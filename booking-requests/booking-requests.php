@@ -18,167 +18,196 @@ if (!defined('ABSPATH')) {
 
 // Define plugin constants
 define('BR_PLUGIN_VERSION', '1.0.0');
+define('BR_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BR_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('BR_PLUGIN_PATH', plugin_dir_path(__FILE__));
 define('BR_PLUGIN_BASENAME', plugin_basename(__FILE__));
 
-/**
- * Activation hook - Create database tables
- */
-register_activation_hook(__FILE__, 'br_activate_plugin');
-function br_activate_plugin() {
-    global $wpdb;
-    
-    $table_name = $wpdb->prefix . 'booking_requests';
-    $charset_collate = $wpdb->get_charset_collate();
-    
-    $sql = "CREATE TABLE IF NOT EXISTS $table_name (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        first_name VARCHAR(100) NOT NULL,
-        last_name VARCHAR(100) NOT NULL,
-        email VARCHAR(255) NOT NULL,
-        phone VARCHAR(20),
-        details TEXT,
-        checkin_date DATE NOT NULL,
-        checkout_date DATE NOT NULL,
-        weekly_rate DECIMAL(10,2),
-        status ENUM('pending', 'approved', 'denied') DEFAULT 'pending',
-        form_entry_id INT,
-        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        admin_notes TEXT,
-        approval_token VARCHAR(64),
-        token_expires DATETIME,
-        INDEX idx_status (status),
-        INDEX idx_dates (checkin_date, checkout_date),
-        INDEX idx_token (approval_token)
-    ) $charset_collate;";
-    
-    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-    dbDelta($sql);
+// Activation hook
+register_activation_hook(__FILE__, 'br_activate');
+function br_activate() {
+    // Create database tables
+    require_once BR_PLUGIN_DIR . 'includes/class-database.php';
+    BR_Database::create_tables();
     
     // Set default options
-    add_option('br_email_from', get_option('admin_email'));
-    add_option('br_email_from_name', get_bloginfo('name'));
-    add_option('br_minimum_days', 7);
+    add_option('br_admin_email', get_option('admin_email'));
     add_option('br_week_start_day', 'saturday');
-    add_option('br_min_advance_days', 1);
-}
-
-/**
- * Deactivation hook
- */
-register_deactivation_hook(__FILE__, 'br_deactivate_plugin');
-function br_deactivate_plugin() {
-    // Cleanup if needed
-}
-
-/**
- * Load plugin textdomain
- */
-add_action('plugins_loaded', 'br_load_textdomain');
-function br_load_textdomain() {
-    load_plugin_textdomain('booking-requests', false, dirname(BR_PLUGIN_BASENAME) . '/languages');
-}
-
-/**
- * Include required files
- */
-require_once BR_PLUGIN_PATH . 'includes/class-booking-requests.php';
-require_once BR_PLUGIN_PATH . 'includes/class-admin-dashboard.php';
-require_once BR_PLUGIN_PATH . 'includes/class-email-handler.php';
-require_once BR_PLUGIN_PATH . 'includes/class-booking-calendar-widget.php';
-require_once BR_PLUGIN_PATH . 'includes/functions.php';
-
-// Only load Gravity Forms addon if GF is active
-if (class_exists('GFForms')) {
-    require_once BR_PLUGIN_PATH . 'includes/class-gravity-forms-addon.php';
-}
-
-// Only load Elementor widgets if Elementor is active
-if (did_action('elementor/loaded')) {
-    require_once BR_PLUGIN_PATH . 'includes/class-elementor-widget.php';
-    require_once BR_PLUGIN_PATH . 'includes/class-elementor-calendar-widget.php';
-}
-
-/**
- * Initialize the plugin
- */
-add_action('init', 'br_init_plugin');
-function br_init_plugin() {
-    // Initialize main plugin class
-    $booking_requests = new BR_Booking_Requests();
-    $booking_requests->init();
+    add_option('br_approval_required', '1');
+    add_option('br_calendar_months_to_show', '12');
+    add_option('br_calendar_min_advance_days', '1');
     
-    // Initialize admin dashboard if in admin
-    if (is_admin()) {
-        $admin_dashboard = new BR_Admin_Dashboard();
-        $admin_dashboard->init();
+    // Flush rewrite rules
+    flush_rewrite_rules();
+}
+
+// Deactivation hook
+register_deactivation_hook(__FILE__, 'br_deactivate');
+function br_deactivate() {
+    // Flush rewrite rules
+    flush_rewrite_rules();
+}
+
+// Initialize plugin
+add_action('plugins_loaded', 'br_init');
+function br_init() {
+    // Load text domain
+    load_plugin_textdomain('booking-requests', false, dirname(BR_PLUGIN_BASENAME) . '/languages');
+    
+    // Check if required plugins are active
+    if (!function_exists('is_plugin_active')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
     }
     
-    // Initialize email handler
-    $email_handler = new BR_Email_Handler();
-    $email_handler->init();
+    if (is_plugin_active('gravityforms/gravityforms.php')) {
+        // Gravity Forms is active
+    } else {
+        add_action('admin_notices', 'br_gravity_forms_missing_notice');
+    }
     
-    // Initialize calendar widget
-    $calendar_widget = new BR_Booking_Calendar_Widget();
-    $calendar_widget->init();
+    if (!did_action('elementor/loaded')) {
+        add_action('admin_notices', 'br_elementor_missing_notice');
+    }
+    
+    // Load dependencies - check if files exist first
+    $required_files = array(
+        'includes/class-database.php',
+        'includes/class-admin-menu.php',
+        'includes/class-form-handler.php',
+        'includes/class-email-handler.php',
+        'includes/class-pricing-engine.php',
+        'includes/class-booking-calendar-widget.php',
+        'includes/functions.php'
+    );
+    
+    foreach ($required_files as $file) {
+        $file_path = BR_PLUGIN_DIR . $file;
+        if (file_exists($file_path)) {
+            require_once $file_path;
+        } else {
+            error_log('Booking Requests Plugin: Missing required file - ' . $file);
+        }
+    }
+    
+    // Initialize components only if classes exist
+    if (class_exists('BR_Database')) {
+        new BR_Database();
+    }
+    if (class_exists('BR_Admin_Menu')) {
+        new BR_Admin_Menu();
+    }
+    if (class_exists('BR_Form_Handler')) {
+        new BR_Form_Handler();
+    }
+    if (class_exists('BR_Email_Handler')) {
+        new BR_Email_Handler();
+    }
+    if (class_exists('BR_Pricing_Engine')) {
+        new BR_Pricing_Engine();
+    }
+    if (class_exists('BR_Booking_Calendar_Widget')) {
+        new BR_Booking_Calendar_Widget();
+    }
+    
+    // Load Gravity Forms addon if GF is active
+    if (class_exists('GFForms')) {
+        $gf_addon_path = BR_PLUGIN_DIR . 'includes/class-gravity-forms-addon.php';
+        if (file_exists($gf_addon_path)) {
+            require_once $gf_addon_path;
+            if (class_exists('BR_Gravity_Forms_Addon')) {
+                GFAddOn::register('BR_Gravity_Forms_Addon');
+            }
+        }
+    }
+    
+    // Load Elementor widgets if Elementor is active
+    if (did_action('elementor/loaded')) {
+        add_action('elementor/widgets/widgets_registered', 'br_register_elementor_widgets');
+    }
 }
 
-/**
- * Initialize Gravity Forms addon
- */
-add_action('gform_loaded', 'br_load_gravity_forms_addon', 5);
-function br_load_gravity_forms_addon() {
-    if (!method_exists('GFForms', 'include_addon_framework')) {
+// Initialize email actions
+add_action('init', 'br_init_email_actions');
+function br_init_email_actions() {
+    // Ensure email handler is loaded and instantiated
+    if (class_exists('BR_Email_Handler')) {
+        new BR_Email_Handler();
+    }
+}
+
+// Register Elementor widgets
+function br_register_elementor_widgets() {
+    // Check if Elementor is available
+    if (!class_exists('\Elementor\Widget_Base')) {
         return;
     }
     
-    // Load the addon class file
-    require_once BR_PLUGIN_PATH . 'includes/class-gravity-forms-addon.php';
+    // Register Gravity Forms widget
+    $widget_path = BR_PLUGIN_DIR . 'includes/class-elementor-widget.php';
+    if (file_exists($widget_path)) {
+        require_once $widget_path;
+        if (class_exists('BR_Elementor_Widget')) {
+            \Elementor\Plugin::instance()->widgets_manager->register_widget_type(new BR_Elementor_Widget());
+        }
+    }
     
-    GFForms::include_addon_framework();
-    GFAddOn::register('BR_Gravity_Forms_Addon');
+    // Register Calendar widget
+    $calendar_widget_path = BR_PLUGIN_DIR . 'includes/class-elementor-calendar-widget.php';
+    if (file_exists($calendar_widget_path)) {
+        require_once $calendar_widget_path;
+        if (class_exists('BR_Elementor_Calendar_Widget')) {
+            \Elementor\Plugin::instance()->widgets_manager->register_widget_type(new BR_Elementor_Calendar_Widget());
+        }
+    }
 }
 
-/**
- * Initialize Elementor widgets
- */
-add_action('elementor/widgets/widgets_registered', 'br_register_elementor_widgets');
-function br_register_elementor_widgets($widgets_manager) {
-    // Load widget files only when Elementor is initializing widgets
-    require_once BR_PLUGIN_PATH . 'includes/class-elementor-widget.php';
-    require_once BR_PLUGIN_PATH . 'includes/class-elementor-calendar-widget.php';
+// Enqueue admin scripts and styles
+add_action('admin_enqueue_scripts', 'br_admin_enqueue_scripts');
+function br_admin_enqueue_scripts($hook) {
+    // Only load on our admin pages
+    if (strpos($hook, 'booking-requests') === false) {
+        return;
+    }
     
-    $widgets_manager->register_widget_type(new BR_Elementor_Widget());
-    $widgets_manager->register_widget_type(new BR_Elementor_Calendar_Widget());
+    wp_enqueue_style('br-admin-styles', BR_PLUGIN_URL . 'admin/css/admin-styles.css', array(), BR_PLUGIN_VERSION);
+    wp_enqueue_script('br-admin-scripts', BR_PLUGIN_URL . 'admin/js/admin-scripts.js', array('jquery'), BR_PLUGIN_VERSION, true);
+    
+    // Localize script
+    wp_localize_script('br-admin-scripts', 'br_admin', array(
+        'ajax_url' => admin_url('admin-ajax.php'),
+        'nonce' => wp_create_nonce('br_admin_nonce'),
+        'strings' => array(
+            'confirm_approve' => __('Are you sure you want to approve this booking?', 'booking-requests'),
+            'confirm_deny' => __('Are you sure you want to deny this booking?', 'booking-requests'),
+            'confirm_delete' => __('Are you sure you want to delete this booking?', 'booking-requests'),
+            'processing' => __('Processing...', 'booking-requests'),
+            'error' => __('An error occurred. Please try again.', 'booking-requests')
+        )
+    ));
 }
 
-// Also enqueue scripts globally when using Elementor
-add_action('elementor/frontend/after_enqueue_scripts', function() {
-    if (defined('BR_PLUGIN_URL') && defined('BR_PLUGIN_VERSION')) {
-        wp_enqueue_style('br-calendar-styles', BR_PLUGIN_URL . 'public/css/booking-calendar-v2.css', array(), BR_PLUGIN_VERSION);
-        wp_enqueue_script('br-calendar-script', BR_PLUGIN_URL . 'public/js/booking-calendar-v2.js', array('jquery'), BR_PLUGIN_VERSION, true);
+// Enqueue public scripts and styles
+add_action('wp_enqueue_scripts', 'br_public_enqueue_scripts');
+function br_public_enqueue_scripts() {
+    // Always load public styles
+    wp_enqueue_style('br-public-styles', BR_PLUGIN_URL . 'public/css/public-styles.css', array(), BR_PLUGIN_VERSION);
+    
+    // Conditionally load calendar assets
+    if (br_should_load_calendar_assets()) {
+        // Use v3 files
+        wp_enqueue_style('br-calendar-styles', BR_PLUGIN_URL . 'public/css/booking-calendar-v3.css', array(), BR_PLUGIN_VERSION);
+        wp_enqueue_script('br-calendar-script', BR_PLUGIN_URL . 'public/js/booking-calendar-v3.js', array('jquery'), BR_PLUGIN_VERSION, true);
         
-        // Get day number for start day
+        // Get start day setting
         $start_day = get_option('br_week_start_day', 'saturday');
-        $days = array(
-            'sunday' => 0,
-            'monday' => 1,
-            'tuesday' => 2,
-            'wednesday' => 3,
-            'thursday' => 4,
-            'friday' => 5,
-            'saturday' => 6
-        );
-        $day_number = isset($days[strtolower($start_day)]) ? $days[strtolower($start_day)] : 6;
+        $start_day_number = $start_day === 'sunday' ? 0 : 6;
         
+        // Localize script
         wp_localize_script('br-calendar-script', 'br_calendar', array(
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('br_calendar_nonce'),
-            'start_day' => $day_number,
-            'months_to_show' => 12,
-            'min_advance_days' => get_option('br_min_advance_days', 1),
+            'start_day' => $start_day_number,
+            'months_to_show' => get_option('br_calendar_months_to_show', '12'),
+            'min_advance_days' => get_option('br_calendar_min_advance_days', '1'),
             'currency_symbol' => '€',
             'strings' => array(
                 'select_week' => __('Select Week', 'booking-requests'),
@@ -190,33 +219,234 @@ add_action('elementor/frontend/after_enqueue_scripts', function() {
             )
         ));
     }
-});
-
-/**
- * Enqueue admin scripts and styles
- */
-add_action('admin_enqueue_scripts', 'br_admin_enqueue_scripts');
-function br_admin_enqueue_scripts($hook) {
-    if (strpos($hook, 'booking-requests') !== false) {
-        wp_enqueue_style('br-admin-styles', BR_PLUGIN_URL . 'admin/css/admin-styles.css', array(), BR_PLUGIN_VERSION);
-        wp_enqueue_script('br-admin-scripts', BR_PLUGIN_URL . 'admin/js/admin-scripts.js', array('jquery'), BR_PLUGIN_VERSION, true);
-        wp_localize_script('br-admin-scripts', 'br_ajax', array(
-            'ajax_url' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('br_admin_nonce')
-        ));
+    
+    // Load pricing calculator for Gravity Forms
+    if (br_should_load_pricing_calculator()) {
+        wp_enqueue_script('br-pricing-calculator', BR_PLUGIN_URL . 'public/js/pricing-calculator.js', array('jquery'), BR_PLUGIN_VERSION, true);
     }
 }
 
-/**
- * Enqueue public scripts and styles
- */
-add_action('wp_enqueue_scripts', 'br_public_enqueue_scripts');
-function br_public_enqueue_scripts() {
-    wp_enqueue_style('br-public-styles', BR_PLUGIN_URL . 'public/css/public-styles.css', array(), BR_PLUGIN_VERSION);
-    wp_enqueue_script('br-pricing-calculator', BR_PLUGIN_URL . 'public/js/pricing-calculator.js', array('jquery'), BR_PLUGIN_VERSION, true);
-    wp_localize_script('br-pricing-calculator', 'br_pricing', array(
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'nonce' => wp_create_nonce('br_public_nonce'),
-        'minimum_days' => get_option('br_minimum_days', 7)
+// Check if calendar assets should be loaded
+function br_should_load_calendar_assets() {
+    // Check if we're on a page with the calendar shortcode
+    if (is_singular()) {
+        global $post;
+        if (has_shortcode($post->post_content, 'booking_calendar')) {
+            return true;
+        }
+    }
+    
+    // Check if we're in Elementor editor
+    if (isset($_GET['elementor-preview'])) {
+        return true;
+    }
+    
+    // Check if page uses Elementor and might have our widget
+    if (is_singular() && function_exists('elementor_theme_do_location')) {
+        return true; // Load on all Elementor pages for now
+    }
+    
+    return false;
+}
+
+// Check if pricing calculator should be loaded
+function br_should_load_pricing_calculator() {
+    // Load on all pages with Gravity Forms
+    return class_exists('GFForms');
+}
+
+// Admin notices
+function br_gravity_forms_missing_notice() {
+    ?>
+    <div class="notice notice-warning">
+        <p><?php _e('Booking Requests: Gravity Forms is not active. Some features may not work properly.', 'booking-requests'); ?></p>
+    </div>
+    <?php
+}
+
+function br_elementor_missing_notice() {
+    ?>
+    <div class="notice notice-warning">
+        <p><?php _e('Booking Requests: Elementor is not active. The Elementor widget will not be available.', 'booking-requests'); ?></p>
+    </div>
+    <?php
+}
+
+// Add settings link to plugins page
+add_filter('plugin_action_links_' . BR_PLUGIN_BASENAME, 'br_add_settings_link');
+function br_add_settings_link($links) {
+    $settings_link = '<a href="' . admin_url('admin.php?page=booking-requests-settings') . '">' . __('Settings', 'booking-requests') . '</a>';
+    array_unshift($links, $settings_link);
+    return $links;
+}
+
+// Register shortcodes
+add_shortcode('booking_calendar', 'br_booking_calendar_shortcode');
+function br_booking_calendar_shortcode($atts) {
+    $atts = shortcode_atts(array(
+        'start_day' => get_option('br_week_start_day', 'saturday'),
+        'months' => get_option('br_calendar_months_to_show', '12'),
+        'min_advance' => get_option('br_calendar_min_advance_days', '1')
+    ), $atts);
+    
+    ob_start();
+    ?>
+    <div class="br-calendar-widget" 
+         data-start-day="<?php echo esc_attr($atts['start_day']); ?>"
+         data-months="<?php echo esc_attr($atts['months']); ?>"
+         data-min-advance="<?php echo esc_attr($atts['min_advance']); ?>">
+        <div class="br-calendar-loading"><?php _e('Loading calendar...', 'booking-requests'); ?></div>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+// AJAX handlers for admin actions
+add_action('wp_ajax_br_approve_booking', 'br_handle_approve_booking');
+function br_handle_approve_booking() {
+    // Check nonce
+    if (!wp_verify_nonce($_POST['nonce'], 'br_admin_nonce')) {
+        wp_die('Invalid nonce');
+    }
+    
+    // Check permissions
+    if (!current_user_can('manage_options')) {
+        wp_die('Insufficient permissions');
+    }
+    
+    $booking_id = intval($_POST['booking_id']);
+    
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'br_bookings';
+    
+    $updated = $wpdb->update(
+        $table_name,
+        array('status' => 'approved'),
+        array('id' => $booking_id)
+    );
+    
+    if ($updated !== false) {
+        // Send approval email
+        do_action('br_send_approval_email', $booking_id);
+        wp_send_json_success();
+    } else {
+        wp_send_json_error('Failed to update booking');
+    }
+}
+
+add_action('wp_ajax_br_deny_booking', 'br_handle_deny_booking');
+function br_handle_deny_booking() {
+    // Check nonce
+    if (!wp_verify_nonce($_POST['nonce'], 'br_admin_nonce')) {
+        wp_die('Invalid nonce');
+    }
+    
+    // Check permissions
+    if (!current_user_can('manage_options')) {
+        wp_die('Insufficient permissions');
+    }
+    
+    $booking_id = intval($_POST['booking_id']);
+    
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'br_bookings';
+    
+    $updated = $wpdb->update(
+        $table_name,
+        array('status' => 'denied'),
+        array('id' => $booking_id)
+    );
+    
+    if ($updated !== false) {
+        // Send denial email
+        do_action('br_send_denial_email', $booking_id);
+        wp_send_json_success();
+    } else {
+        wp_send_json_error('Failed to update booking');
+    }
+}
+
+add_action('wp_ajax_br_delete_booking', 'br_handle_delete_booking');
+function br_handle_delete_booking() {
+    // Check nonce
+    if (!wp_verify_nonce($_POST['nonce'], 'br_admin_nonce')) {
+        wp_die('Invalid nonce');
+    }
+    
+    // Check permissions
+    if (!current_user_can('manage_options')) {
+        wp_die('Insufficient permissions');
+    }
+    
+    $booking_id = intval($_POST['booking_id']);
+    
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'br_bookings';
+    
+    $deleted = $wpdb->delete(
+        $table_name,
+        array('id' => $booking_id)
+    );
+    
+    if ($deleted) {
+        wp_send_json_success();
+    } else {
+        wp_send_json_error('Failed to delete booking');
+    }
+}
+
+// Add custom cron schedule for cleanup
+add_filter('cron_schedules', 'br_add_cron_schedules');
+function br_add_cron_schedules($schedules) {
+    $schedules['br_weekly'] = array(
+        'interval' => 604800, // 1 week in seconds
+        'display' => __('Weekly', 'booking-requests')
+    );
+    return $schedules;
+}
+
+// Schedule cleanup on activation
+register_activation_hook(__FILE__, 'br_schedule_cleanup');
+function br_schedule_cleanup() {
+    if (!wp_next_scheduled('br_cleanup_old_bookings')) {
+        wp_schedule_event(time(), 'br_weekly', 'br_cleanup_old_bookings');
+    }
+}
+
+// Clear scheduled cleanup on deactivation
+register_deactivation_hook(__FILE__, 'br_clear_scheduled_cleanup');
+function br_clear_scheduled_cleanup() {
+    wp_clear_scheduled_hook('br_cleanup_old_bookings');
+}
+
+// Cleanup old bookings
+add_action('br_cleanup_old_bookings', 'br_do_cleanup_old_bookings');
+function br_do_cleanup_old_bookings() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'br_bookings';
+    
+    // Delete denied bookings older than 30 days
+    $wpdb->query($wpdb->prepare(
+        "DELETE FROM $table_name WHERE status = 'denied' AND created_at < %s",
+        date('Y-m-d H:i:s', strtotime('-30 days'))
     ));
+}
+
+// Add support for WordPress debugging
+if (defined('WP_DEBUG') && WP_DEBUG) {
+    add_action('init', 'br_debug_info');
+    function br_debug_info() {
+        if (isset($_GET['br_debug']) && current_user_can('manage_options')) {
+            echo '<pre>';
+            echo 'Booking Requests Debug Info' . PHP_EOL;
+            echo '=========================' . PHP_EOL;
+            echo 'Plugin Version: ' . BR_PLUGIN_VERSION . PHP_EOL;
+            echo 'WordPress Version: ' . get_bloginfo('version') . PHP_EOL;
+            echo 'PHP Version: ' . phpversion() . PHP_EOL;
+            echo 'Gravity Forms Active: ' . (class_exists('GFForms') ? 'Yes' : 'No') . PHP_EOL;
+            echo 'Elementor Active: ' . (did_action('elementor/loaded') ? 'Yes' : 'No') . PHP_EOL;
+            echo '</pre>';
+            exit;
+        }
+    }
 }

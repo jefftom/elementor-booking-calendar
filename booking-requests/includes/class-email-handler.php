@@ -1,308 +1,415 @@
 <?php
-/**
- * Email Handler Class
- */
+
 class BR_Email_Handler {
     
-    /**
-     * Initialize email handler
-     */
-    public function init() {
-        // Hook into booking events
-        add_action('booking_request_submitted', array($this, 'send_admin_notification'));
-        add_action('booking_request_approved', array($this, 'send_approval_email'));
-        add_action('booking_request_denied', array($this, 'send_denial_email'));
-    }
-    
-    /**
-     * Set HTML content type for emails
-     */
-    public function set_html_content_type() {
-        return 'text/html';
-    }
-    
-    /**
-     * Send email wrapper that works with SMTP plugins
-     */
-    private function send_email($to, $subject, $message, $headers = array()) {
-        // Debug logging
-        error_log('Attempting to send email:');
-        error_log('To: ' . $to);
-        error_log('Subject: ' . $subject);
-        error_log('Message length: ' . strlen($message));
-        error_log('Message empty: ' . (empty($message) ? 'YES' : 'NO'));
+    public function __construct() {
+        add_action('br_send_admin_notification', array($this, 'send_admin_notification'), 10, 1);
+        add_action('br_send_guest_confirmation', array($this, 'send_guest_confirmation'), 10, 1);
+        add_action('br_send_approval_email', array($this, 'send_approval_email'), 10, 1);
+        add_action('br_send_denial_email', array($this, 'send_denial_email'), 10, 1);
         
-        // Ensure message is not empty
-        if (empty($message)) {
-            error_log('ERROR: Email message is empty!');
+        // Handle approve/deny actions from email links
+        add_action('init', array($this, 'handle_email_actions'));
+    }
+    
+    /**
+     * Handle approve/deny actions from email links
+     */
+    public function handle_email_actions() {
+        if (!isset($_GET['br_action']) || !isset($_GET['booking_id']) || !isset($_GET['token'])) {
+            return;
+        }
+        
+        $action = sanitize_text_field($_GET['br_action']);
+        $booking_id = intval($_GET['booking_id']);
+        $token = sanitize_text_field($_GET['token']);
+        
+        // Verify token
+        $expected_token = wp_hash($booking_id . 'br_booking_action');
+        if ($token !== $expected_token) {
+            wp_die('Invalid token');
+        }
+        
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'br_bookings';
+        
+        if ($action === 'approve') {
+            $wpdb->update(
+                $table_name,
+                array('status' => 'approved'),
+                array('id' => $booking_id)
+            );
+            
+            // Send approval email
+            do_action('br_send_approval_email', $booking_id);
+            
+            // Redirect to success page
+            wp_redirect(add_query_arg('br_status', 'approved', home_url()));
+            exit;
+            
+        } elseif ($action === 'deny') {
+            $wpdb->update(
+                $table_name,
+                array('status' => 'denied'),
+                array('id' => $booking_id)
+            );
+            
+            // Send denial email
+            do_action('br_send_denial_email', $booking_id);
+            
+            // Redirect to success page
+            wp_redirect(add_query_arg('br_status', 'denied', home_url()));
+            exit;
+        }
+    }
+    
+    /**
+     * Send notification to admin when new booking is created
+     */
+    public function send_admin_notification($booking_id) {
+        $booking = $this->get_booking_data($booking_id);
+        if (!$booking) {
             return false;
         }
         
-        // Add content type to headers if not already set
-        $has_content_type = false;
-        foreach ($headers as $header) {
-            if (stripos($header, 'content-type') !== false) {
-                $has_content_type = true;
-                break;
+        $admin_email = get_option('br_admin_email', get_option('admin_email'));
+        $subject = 'New Booking Request #' . $booking_id;
+        
+        // Format the booking data properly
+        $booking_data = $booking['booking_data'];
+        $weeks_info = '';
+        
+        if (isset($booking_data['weeks']) && is_array($booking_data['weeks'])) {
+            $weeks_info = "\n**Selected Weeks:**\n";
+            foreach ($booking_data['weeks'] as $week) {
+                $start = date('D, M j, Y', strtotime($week['start']));
+                $end = date('D, M j, Y', strtotime($week['end']));
+                $rate = number_format($week['rate'], 0, ',', '.');
+                $weeks_info .= "- {$start} to {$end} - €{$rate}\n";
             }
         }
         
-        if (!$has_content_type) {
-            $headers[] = 'Content-Type: text/html; charset=UTF-8';
-        }
-        
-        // Use wp_mail which will be handled by WP Mail SMTP or similar plugins
-        $result = wp_mail($to, $subject, $message, $headers);
-        
-        // Log the result
-        error_log('Email send result: ' . ($result ? 'SUCCESS' : 'FAILED'));
-        
-        return $result;
-    }
-    
-    /**
-     * Send admin notification for new booking
-     */
-    public function send_admin_notification($booking_data) {
-        $admin_emails = get_option('br_admin_emails', get_option('admin_email'));
-        $admin_emails = array_map('trim', explode(',', $admin_emails));
-        
-        $subject = sprintf(
-            __('New Booking Request - %s %s (%s to %s)', 'booking-requests'),
-            $booking_data['first_name'],
-            $booking_data['last_name'],
-            date('d/m/Y', strtotime($booking_data['checkin_date'])),
-            date('d/m/Y', strtotime($booking_data['checkout_date']))
-        );
-        
-        // Calculate nights
-        $checkin = new DateTime($booking_data['checkin_date']);
-        $checkout = new DateTime($booking_data['checkout_date']);
-        $nights = $checkin->diff($checkout)->days;
-        
-        // Generate approval links
+        // Generate approve/deny links with token
+        $token = wp_hash($booking_id . 'br_booking_action');
         $approve_url = add_query_arg(array(
             'br_action' => 'approve',
-            'token' => $booking_data['approval_token']
+            'booking_id' => $booking_id,
+            'token' => $token
         ), home_url());
         
         $deny_url = add_query_arg(array(
             'br_action' => 'deny',
-            'token' => $booking_data['approval_token']
+            'booking_id' => $booking_id,
+            'token' => $token
         ), home_url());
         
-        // Check if template file exists
-        $template_path = BR_PLUGIN_PATH . 'templates/emails/admin-notification.php';
-        if (!file_exists($template_path)) {
-            error_log('Booking email template not found: ' . $template_path);
-            // Fallback to simple message
-            $message = sprintf(
-                '<h2>New Booking Request</h2>
-                <p><strong>Guest:</strong> %s %s</p>
-                <p><strong>Email:</strong> %s</p>
-                <p><strong>Phone:</strong> %s</p>
-                <p><strong>Dates:</strong> %s to %s (%d nights)</p>
-                <p><strong>Weekly Rate:</strong> €%s</p>
-                <p><strong>Message:</strong> %s</p>
-                <p><a href="%s">Approve Booking</a> | <a href="%s">Deny Booking</a></p>',
-                esc_html($booking_data['first_name']),
-                esc_html($booking_data['last_name']),
-                esc_html($booking_data['email']),
-                esc_html($booking_data['phone']),
-                date('d/m/Y', strtotime($booking_data['checkin_date'])),
-                date('d/m/Y', strtotime($booking_data['checkout_date'])),
-                $nights,
-                number_format($booking_data['weekly_rate'], 0, ',', '.'),
-                nl2br(esc_html($booking_data['details'])),
-                esc_url($approve_url),
-                esc_url($deny_url)
-            );
-        } else {
-            // Load template
-            ob_start();
-            include $template_path;
-            $message = ob_get_clean();
-        }
-        
-        // Ensure we have a message
-        if (empty($message)) {
-            error_log('Booking email message is empty after template rendering');
-            $message = '<p>A new booking request has been submitted. Please check your admin dashboard.</p>';
-        }
+        $body = $this->get_email_template('admin-notification', array_merge($booking, array(
+            'weeks_info' => $weeks_info,
+            'approve_url' => $approve_url,
+            'deny_url' => $deny_url
+        )));
         
         $headers = array(
-            'From: ' . get_option('br_email_from_name', get_bloginfo('name')) . ' <' . get_option('br_email_from', get_option('admin_email')) . '>',
-            'Reply-To: ' . $booking_data['email'],
-            'Content-Type: text/html; charset=UTF-8'
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . get_option('admin_email') . '>'
         );
         
-        // Send to each admin email
-        $sent_count = 0;
-        foreach ($admin_emails as $admin_email) {
-            if ($this->send_email($admin_email, $subject, $message, $headers)) {
-                $sent_count++;
-            } else {
-                error_log('Failed to send booking notification to: ' . $admin_email);
-            }
+        return wp_mail($admin_email, $subject, $body, $headers);
+    }
+    
+    /**
+     * Send confirmation email to guest after booking
+     */
+    public function send_guest_confirmation($booking_id) {
+        $booking = $this->get_booking_data($booking_id);
+        if (!$booking) {
+            return false;
         }
         
-        // Log email activity
-        $this->log_email('admin_notification', $booking_data['id'], $admin_emails);
+        $subject = 'Booking Request Received - #' . $booking_id;
         
-        return $sent_count > 0;
+        // Format the booking data properly
+        $booking_data = $booking['booking_data'];
+        $weeks_info = '';
+        $total_price = 0;
+        
+        if (isset($booking_data['weeks']) && is_array($booking_data['weeks'])) {
+            $weeks_info = "<h3>Selected Weeks:</h3><ul>";
+            foreach ($booking_data['weeks'] as $week) {
+                $start = date('D, M j, Y', strtotime($week['start']));
+                $end = date('D, M j, Y', strtotime($week['end']));
+                $rate = number_format($week['rate'], 0, ',', '.');
+                $weeks_info .= "<li>{$start} to {$end} - €{$rate}</li>";
+                $total_price += $week['rate'];
+            }
+            $weeks_info .= "</ul>";
+        }
+        
+        $booking['weeks_info'] = $weeks_info;
+        $booking['total_price'] = '€' . number_format($total_price, 0, ',', '.');
+        
+        $body = $this->get_email_template('guest-confirmation', $booking);
+        
+        $headers = array(
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . get_option('admin_email') . '>'
+        );
+        
+        return wp_mail($booking['email'], $subject, $body, $headers);
     }
     
     /**
      * Send approval email to guest
      */
     public function send_approval_email($booking_id) {
-        $booking = BR_Booking_Requests::get_booking($booking_id);
+        $booking = $this->get_booking_data($booking_id);
         if (!$booking) {
-            return;
+            return false;
         }
         
-        $subject = sprintf(
-            __('Booking Confirmed - Your Stay at %s', 'booking-requests'),
-            get_bloginfo('name')
-        );
+        $subject = 'Your Booking Request Has Been Approved!';
         
-        // Calculate nights
-        $checkin = new DateTime($booking->checkin_date);
-        $checkout = new DateTime($booking->checkout_date);
-        $nights = $checkin->diff($checkout)->days;
+        // Format weeks info
+        $booking_data = $booking['booking_data'];
+        $weeks_info = '';
+        $total_price = 0;
         
-        // Load template
-        ob_start();
-        include BR_PLUGIN_PATH . 'templates/emails/approval-email.php';
-        $message = ob_get_clean();
+        if (isset($booking_data['weeks']) && is_array($booking_data['weeks'])) {
+            $weeks_info = "<ul>";
+            foreach ($booking_data['weeks'] as $week) {
+                $start = date('D, M j, Y', strtotime($week['start']));
+                $end = date('D, M j, Y', strtotime($week['end']));
+                $rate = number_format($week['rate'], 0, ',', '.');
+                $weeks_info .= "<li>{$start} to {$end} - €{$rate}</li>";
+                $total_price += $week['rate'];
+            }
+            $weeks_info .= "</ul>";
+        }
+        
+        $booking['weeks_info'] = $weeks_info;
+        $booking['total_price'] = '€' . number_format($total_price, 0, ',', '.');
+        
+        $body = $this->get_email_template('approval-email', $booking);
         
         $headers = array(
-            'From: ' . get_option('br_email_from_name', get_bloginfo('name')) . ' <' . get_option('br_email_from', get_option('admin_email')) . '>',
-            'Content-Type: text/html; charset=UTF-8'
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . get_option('admin_email') . '>'
         );
         
-        $result = $this->send_email($booking->email, $subject, $message, $headers);
-        
-        // Log email activity
-        $this->log_email('approval', $booking_id, $booking->email);
-        
-        return $result;
+        return wp_mail($booking['email'], $subject, $body, $headers);
     }
     
     /**
      * Send denial email to guest
      */
     public function send_denial_email($booking_id) {
-        $booking = BR_Booking_Requests::get_booking($booking_id);
+        $booking = $this->get_booking_data($booking_id);
         if (!$booking) {
-            return;
+            return false;
         }
         
-        $subject = sprintf(
-            __('Booking Request Update - %s', 'booking-requests'),
-            get_bloginfo('name')
-        );
-        
-        // Find alternative dates
-        $alternative_dates = $this->find_alternative_dates($booking->checkin_date, $booking->checkout_date);
-        
-        // Load template
-        ob_start();
-        include BR_PLUGIN_PATH . 'templates/emails/denial-email.php';
-        $message = ob_get_clean();
+        $subject = 'Update on Your Booking Request';
+        $body = $this->get_email_template('denial-email', $booking);
         
         $headers = array(
-            'From: ' . get_option('br_email_from_name', get_bloginfo('name')) . ' <' . get_option('br_email_from', get_option('admin_email')) . '>',
-            'Content-Type: text/html; charset=UTF-8'
+            'Content-Type: text/html; charset=UTF-8',
+            'From: ' . get_bloginfo('name') . ' <' . get_option('admin_email') . '>'
         );
         
-        $result = $this->send_email($booking->email, $subject, $message, $headers);
-        
-        // Log email activity
-        $this->log_email('denial', $booking_id, $booking->email);
-        
-        return $result;
+        return wp_mail($booking['email'], $subject, $body, $headers);
     }
     
     /**
-     * Find alternative available dates
+     * Get booking data
      */
-    private function find_alternative_dates($checkin, $checkout) {
+    private function get_booking_data($booking_id) {
         global $wpdb;
-        $table_name = $wpdb->prefix . 'booking_requests';
         
-        $checkin_date = new DateTime($checkin);
-        $checkout_date = new DateTime($checkout);
-        $duration = $checkin_date->diff($checkout_date)->days;
+        $table_name = $wpdb->prefix . 'br_bookings';
+        $booking = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $table_name WHERE id = %d",
+            $booking_id
+        ), ARRAY_A);
         
-        $alternatives = array();
-        
-        // Check dates before requested dates
-        $alt_checkin = clone $checkin_date;
-        $alt_checkin->modify('-' . $duration . ' days');
-        $alt_checkout = clone $checkin_date;
-        
-        if ($this->check_availability($alt_checkin->format('Y-m-d'), $alt_checkout->format('Y-m-d'))) {
-            $alternatives[] = array(
-                'checkin' => $alt_checkin->format('d/m/Y'),
-                'checkout' => $alt_checkout->format('d/m/Y')
-            );
+        if (!$booking) {
+            return false;
         }
         
-        // Check dates after requested dates
-        $alt_checkin = clone $checkout_date;
-        $alt_checkout = clone $checkout_date;
-        $alt_checkout->modify('+' . $duration . ' days');
+        // Parse booking data
+        $booking['booking_data'] = maybe_unserialize($booking['booking_data']);
         
-        if ($this->check_availability($alt_checkin->format('Y-m-d'), $alt_checkout->format('Y-m-d'))) {
-            $alternatives[] = array(
-                'checkin' => $alt_checkin->format('d/m/Y'),
-                'checkout' => $alt_checkout->format('d/m/Y')
-            );
-        }
+        // Format dates
+        $booking['checkin_formatted'] = date('l, F j, Y', strtotime($booking['checkin_date']));
+        $booking['checkout_formatted'] = date('l, F j, Y', strtotime($booking['checkout_date']));
         
-        return $alternatives;
-    }
-    
-    /**
-     * Check if dates are available
-     */
-    private function check_availability($checkin, $checkout) {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'booking_requests';
+        // Calculate nights
+        $checkin = new DateTime($booking['checkin_date']);
+        $checkout = new DateTime($booking['checkout_date']);
+        $booking['nights'] = $checkin->diff($checkout)->days;
         
-        $overlapping = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $table_name 
-            WHERE status = 'approved' 
-            AND NOT (checkin_date >= %s OR checkout_date <= %s)",
-            $checkout,
-            $checkin
-        ));
+        // Format price
+        $booking['total_price_formatted'] = '€' . number_format($booking['total_price'], 0, ',', '.');
         
-        return $overlapping == 0;
-    }
-    
-    /**
-     * Log email activity
-     */
-    private function log_email($type, $booking_id, $recipient) {
-        // This could be expanded to save to database or file
-        do_action('br_email_sent', array(
-            'type' => $type,
-            'booking_id' => $booking_id,
-            'recipient' => $recipient,
-            'timestamp' => current_time('mysql')
-        ));
+        return $booking;
     }
     
     /**
      * Get email template
      */
-    public static function get_email_template($template_name, $variables = array()) {
-        extract($variables);
+    private function get_email_template($template, $data) {
+        // Map template names to actual file names in your structure
+        $template_map = array(
+            'admin-notification' => 'admin-notification-email.php',
+            'guest-confirmation' => 'guest-confirmation-email.php',
+            'approval-email' => 'approval-email.php',
+            'denial-email' => 'denial-email.php'
+        );
+        
+        $template_file = isset($template_map[$template]) ? $template_map[$template] : $template . '.php';
+        $template_path = BR_PLUGIN_DIR . 'includes/templates/' . $template_file;
+        
+        if (!file_exists($template_path)) {
+            error_log('BR Email Handler: Template not found: ' . $template_path);
+            return $this->get_fallback_template($template, $data);
+        }
         
         ob_start();
-        include BR_PLUGIN_PATH . 'templates/emails/' . $template_name . '.php';
-        return ob_get_clean();
+        extract($data);
+        include $template_path;
+        $content = ob_get_clean();
+        
+        return $content;
+    }
+    
+    /**
+     * Get fallback template
+     */
+    private function get_fallback_template($template, $data) {
+        switch ($template) {
+            case 'admin-notification':
+                return $this->get_fallback_admin_notification($data);
+            case 'guest-confirmation':
+                return $this->get_fallback_guest_confirmation($data);
+            case 'approval-email':
+                return $this->get_fallback_approval_email($data);
+            case 'denial-email':
+                return $this->get_fallback_denial_email($data);
+            default:
+                return '';
+        }
+    }
+    
+    /**
+     * Fallback templates
+     */
+    private function get_fallback_admin_notification($data) {
+        $html = '<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>New Booking Request</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2>New Booking Request</h2>
+        <p><strong>Guest:</strong> ' . esc_html($data['guest_name']) . '</p>
+        <p><strong>Email:</strong> ' . esc_html($data['email']) . '</p>
+        <p><strong>Phone:</strong> ' . esc_html($data['phone']) . '</p>
+        <p><strong>Dates:</strong> ' . esc_html($data['checkin_formatted']) . ' to ' . esc_html($data['checkout_formatted']) . ' (' . $data['nights'] . ' nights)</p>
+        ' . $data['weeks_info'] . '
+        <p><strong>Total Price:</strong> ' . esc_html($data['total_price_formatted']) . '</p>';
+        
+        if (!empty($data['message'])) {
+            $html .= '<p><strong>Message:</strong> ' . nl2br(esc_html($data['message'])) . '</p>';
+        }
+        
+        $html .= '<p style="margin-top: 30px;">
+            <a href="' . esc_url($data['approve_url']) . '" style="background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; margin-right: 10px;">Approve Booking</a>
+            <a href="' . esc_url($data['deny_url']) . '" style="background-color: #f44336; color: white; padding: 10px 20px; text-decoration: none;">Deny Booking</a>
+        </p>
+    </div>
+</body>
+</html>';
+        
+        return $html;
+    }
+    
+    private function get_fallback_guest_confirmation($data) {
+        return '<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Booking Request Received</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2>Thank You for Your Booking Request!</h2>
+        <p>Dear ' . esc_html($data['guest_name']) . ',</p>
+        <p>We have received your booking request and will review it shortly. You will receive an email once your booking has been processed.</p>
+        
+        <h3>Booking Details:</h3>
+        <p><strong>Check-in:</strong> ' . esc_html($data['checkin_formatted']) . '</p>
+        <p><strong>Check-out:</strong> ' . esc_html($data['checkout_formatted']) . '</p>
+        <p><strong>Total Nights:</strong> ' . $data['nights'] . '</p>
+        ' . $data['weeks_info'] . '
+        <p><strong>Total Price:</strong> ' . esc_html($data['total_price']) . '</p>
+        
+        <p>If you have any questions, please don\'t hesitate to contact us.</p>
+        
+        <p>Best regards,<br>' . get_bloginfo('name') . '</p>
+    </div>
+</body>
+</html>';
+    }
+    
+    private function get_fallback_approval_email($data) {
+        return '<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Booking Approved</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2>Your Booking Has Been Approved!</h2>
+        <p>Dear ' . esc_html($data['guest_name']) . ',</p>
+        <p>Great news! Your booking request has been approved.</p>
+        
+        <h3>Confirmed Booking Details:</h3>
+        <p><strong>Check-in:</strong> ' . esc_html($data['checkin_formatted']) . '</p>
+        <p><strong>Check-out:</strong> ' . esc_html($data['checkout_formatted']) . '</p>
+        <p><strong>Total Nights:</strong> ' . $data['nights'] . '</p>
+        ' . $data['weeks_info'] . '
+        <p><strong>Total Price:</strong> ' . esc_html($data['total_price']) . '</p>
+        
+        <p>We look forward to welcoming you!</p>
+        
+        <p>Best regards,<br>' . get_bloginfo('name') . '</p>
+    </div>
+</body>
+</html>';
+    }
+    
+    private function get_fallback_denial_email($data) {
+        return '<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Booking Update</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2>Update on Your Booking Request</h2>
+        <p>Dear ' . esc_html($data['guest_name']) . ',</p>
+        <p>Thank you for your interest in booking with us. Unfortunately, we are unable to accommodate your request for the selected dates.</p>
+        
+        <p>We encourage you to check our availability for alternative dates. We would love to welcome you at another time.</p>
+        
+        <p>If you have any questions, please feel free to contact us.</p>
+        
+        <p>Best regards,<br>' . get_bloginfo('name') . '</p>
+    </div>
+</body>
+</html>';
     }
 }
