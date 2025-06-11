@@ -69,11 +69,23 @@ class BR_Email_Handler {
     public function send_admin_notification($booking_id) {
         $booking = $this->get_booking_data($booking_id);
         if (!$booking) {
+            error_log('BR Email Handler: Invalid booking ID ' . $booking_id);
             return false;
         }
         
-        $admin_email = get_option('br_admin_email', get_option('admin_email'));
-        $subject = 'New Booking Request #' . $booking_id;
+        // Get the BR admin email setting - NOTE: using br_admin_emails (plural)
+        $admin_email = get_option('br_admin_emails', '');
+        error_log('BR Email Handler: br_admin_emails option value: "' . $admin_email . '"');
+        
+        // Only use WordPress admin email if BR setting is completely empty
+        if (empty(trim($admin_email))) {
+            $admin_email = get_option('admin_email');
+            error_log('BR Email Handler: Using WordPress admin email as fallback: ' . $admin_email);
+        } else {
+            error_log('BR Email Handler: Using BR admin email: ' . $admin_email);
+        }
+        
+        $subject = 'New Booking Request - ' . $booking['guest_name'] . ' (' . date('m/d/Y', strtotime($booking['checkin_date'])) . ' to ' . date('m/d/Y', strtotime($booking['checkout_date'])) . ')';
         
         // Format the booking data properly
         $booking_data = $booking['booking_data'];
@@ -114,7 +126,11 @@ class BR_Email_Handler {
             'From: ' . get_bloginfo('name') . ' <' . get_option('admin_email') . '>'
         );
         
-        return wp_mail($admin_email, $subject, $body, $headers);
+        error_log('BR Email Handler: Attempting to send admin email to: ' . $admin_email);
+        $sent = wp_mail($admin_email, $subject, $body, $headers);
+        error_log('BR Email Handler: Email sent status: ' . ($sent ? 'SUCCESS' : 'FAILED'));
+        
+        return $sent;
     }
     
     /**
@@ -126,27 +142,11 @@ class BR_Email_Handler {
             return false;
         }
         
-        $subject = 'Booking Request Received - #' . $booking_id;
+        $subject = 'Booking Request Received - ' . $booking['guest_name'];
         
-        // Format the booking data properly
-        $booking_data = $booking['booking_data'];
-        $weeks_info = '';
-        $total_price = 0;
-        
-        if (isset($booking_data['weeks']) && is_array($booking_data['weeks'])) {
-            $weeks_info = "<h3>Selected Weeks:</h3><ul>";
-            foreach ($booking_data['weeks'] as $week) {
-                $start = date('D, M j, Y', strtotime($week['start']));
-                $end = date('D, M j, Y', strtotime($week['end']));
-                $rate = number_format($week['rate'], 0, ',', '.');
-                $weeks_info .= "<li>{$start} to {$end} - €{$rate}</li>";
-                $total_price += $week['rate'];
-            }
-            $weeks_info .= "</ul>";
-        }
-        
-        $booking['weeks_info'] = $weeks_info;
-        $booking['total_price'] = '€' . number_format($total_price, 0, ',', '.');
+        // Don't include pricing in guest confirmation
+        $booking['weeks_info'] = '';
+        $booking['total_price'] = '';
         
         $body = $this->get_email_template('guest-confirmation', $booking);
         
@@ -257,19 +257,25 @@ class BR_Email_Handler {
      * Get email template
      */
     private function get_email_template($template, $data) {
-        // Map template names to actual file names in your structure
-        $template_map = array(
-            'admin-notification' => 'admin-notification-email.php',
-            'guest-confirmation' => 'guest-confirmation-email.php',
-            'approval-email' => 'approval-email.php',
-            'denial-email' => 'denial-email.php'
+        // Try multiple possible locations for templates
+        $possible_paths = array(
+            BR_PLUGIN_DIR . 'includes/templates/' . $template . '-email.php',
+            BR_PLUGIN_DIR . 'includes/templates/' . $template . '.php',
+            BR_PLUGIN_DIR . 'templates/emails/' . $template . '.php',
+            BR_PLUGIN_DIR . 'templates/' . $template . '.php'
         );
         
-        $template_file = isset($template_map[$template]) ? $template_map[$template] : $template . '.php';
-        $template_path = BR_PLUGIN_DIR . 'includes/templates/' . $template_file;
+        $template_path = '';
+        foreach ($possible_paths as $path) {
+            if (file_exists($path)) {
+                $template_path = $path;
+                break;
+            }
+        }
         
-        if (!file_exists($template_path)) {
-            error_log('BR Email Handler: Template not found: ' . $template_path);
+        if (empty($template_path)) {
+            error_log('BR Email Handler: Template not found in any location for: ' . $template);
+            error_log('BR Email Handler: Tried paths: ' . implode(', ', $possible_paths));
             return $this->get_fallback_template($template, $data);
         }
         

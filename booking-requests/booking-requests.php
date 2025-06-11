@@ -52,6 +52,9 @@ add_action('plugins_loaded', 'br_init');
 function br_init() {
     // Load text domain
     load_plugin_textdomain('booking-requests', false, dirname(BR_PLUGIN_BASENAME) . '/languages');
+	
+	
+	
     
     // Check if required plugins are active
     if (!function_exists('is_plugin_active')) {

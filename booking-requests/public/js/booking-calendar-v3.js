@@ -1,166 +1,76 @@
-jQuery(document).ready(function($) {
+(function($) {
     'use strict';
-    
-    // Modern Multi-Week Calendar Widget
+
     class BookingCalendarV3 {
         constructor(container) {
-            this.container = $(container);
-            this.currentDate = new Date();
-            this.selectedWeeks = []; // Array to store multiple weeks
-            this.maxWeeks = 8; // Maximum 8 weeks
-            this.calendarData = null;
-            this.visibleMonths = 2;
-            this.currentMonthOffset = 0;
-            this.maxMonthsAhead = 12;
-            
-            // Get start day from widget data or global settings
-            const widgetStartDay = this.container.data('start-day');
-            if (widgetStartDay === 'sunday') {
-                this.startDayNumber = 0;
-            } else if (widgetStartDay === 'monday') {
-                this.startDayNumber = 1;
-            } else if (widgetStartDay === 'saturday') {
-                this.startDayNumber = 6;
-            } else {
-                // Default to Sunday
-                this.startDayNumber = 0;
-            }
-            
-            console.log('Calendar initialized with start day:', this.startDayNumber, 'from widget:', widgetStartDay);
+            this.container = container;
+            this.currentOffset = 0;
+            this.monthsToShow = 2;
+            this.selectedWeeks = [];
+            this.pricingData = {};
+            this.bookedDates = [];
+            this.startDayNumber = 0; // Default to Sunday
+            this.maxWeeks = 8; // Maximum weeks that can be selected
             
             this.init();
         }
-        
+
         init() {
-            this.createCalendarStructure();
+            // Get configuration from data attributes
+            const widgetData = $(this.container).data();
+            const startDay = widgetData.startDay || br_calendar.start_day || 'sunday';
+            
+            // Convert day name to number
+            this.startDayNumber = this.getDayNumber(startDay);
+            
+            console.log('Calendar initialized with start day:', this.startDayNumber, 'from widget:', startDay);
+            
             this.loadCalendarData();
             this.bindEvents();
         }
-        
-        createCalendarStructure() {
-            const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            const startDayName = dayNames[this.startDayNumber];
+
+        getDayNumber(dayName) {
+            const days = {
+                'sunday': 0,
+                'monday': 1,
+                'tuesday': 2,
+                'wednesday': 3,
+                'thursday': 4,
+                'friday': 5,
+                'saturday': 6
+            };
             
-            const html = `
-                <div class="br-calendar-v3">
-                    <div class="br-calendar-header">
-                        <div class="br-calendar-title">
-                            <h3>Select your weeks</h3>
-                            <p>Click on ${startDayName}s to select weeks (${startDayName} to ${startDayName}, 7 nights each)</p>
-                            <p class="br-selection-info">You can select up to ${this.maxWeeks} weeks</p>
-                        </div>
-                    </div>
-                    
-                    <div class="br-calendar-container">
-                        <div class="br-calendar-nav">
-                            <button class="br-nav-prev" disabled>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <polyline points="15 18 9 12 15 6"></polyline>
-                                </svg>
-                                <span>Previous Months</span>
-                            </button>
-                            <div class="br-nav-months"></div>
-                            <button class="br-nav-next">
-                                <span>Next Months</span>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <polyline points="9 18 15 12 9 6"></polyline>
-                                </svg>
-                            </button>
-                        </div>
-                        
-                        <div class="br-calendar-scroll-container">
-                            <div class="br-calendar-months-wrapper">
-                                <div class="br-calendar-loading">
-                                    <div class="br-spinner"></div>
-                                    <p>Loading availability...</p>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="br-selected-weeks-summary" style="display: none;">
-                            <h4>Selected Weeks: <span class="br-week-count">0</span></h4>
-                            <div class="br-weeks-list"></div>
-                            <div class="br-total-price">
-                                <span>Total Price:</span>
-                                <strong class="br-price-total">€0</strong>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="br-booking-form-container" style="display: none;">
-                        <div class="br-form-header">
-                            <h3>Complete your booking</h3>
-                        </div>
-                        
-                        <form id="br-booking-form-v3">
-                            <div class="br-form-grid">
-                                <div class="br-form-group">
-                                    <label>First Name *</label>
-                                    <input type="text" name="first_name" required>
-                                </div>
-                                <div class="br-form-group">
-                                    <label>Last Name *</label>
-                                    <input type="text" name="last_name" required>
-                                </div>
-                            </div>
-                            
-                            <div class="br-form-grid">
-                                <div class="br-form-group">
-                                    <label>Email *</label>
-                                    <input type="email" name="email" required>
-                                </div>
-                                <div class="br-form-group">
-                                    <label>Phone</label>
-                                    <input type="tel" name="phone">
-                                </div>
-                            </div>
-                            
-                            <div class="br-form-group">
-                                <label>Special Requests</label>
-                                <textarea name="details" rows="3" placeholder="Any special requests or notes..."></textarea>
-                            </div>
-                            
-                            <input type="hidden" name="booking_weeks" id="br-booking-weeks">
-                            
-                            <div class="br-form-actions">
-                                <button type="button" class="br-btn-secondary br-change-dates">Change Dates</button>
-                                <button type="submit" class="br-btn-primary">
-                                    <span class="btn-text">Request Booking</span>
-                                    <span class="btn-loading" style="display: none;">
-                                        <span class="br-spinner-small"></span> Processing...
-                                    </span>
-                                </button>
-                            </div>
-                        </form>
-                        
-                        <div class="br-form-message"></div>
-                    </div>
-                </div>
-            `;
+            if (typeof dayName === 'number') {
+                return dayName;
+            }
             
-            this.container.html(html);
+            return days[dayName.toLowerCase()] || 0;
         }
-        
+
         loadCalendarData() {
             const self = this;
             const startDate = new Date();
             const endDate = new Date();
-            endDate.setMonth(endDate.getMonth() + this.maxMonthsAhead);
-            
+            endDate.setMonth(endDate.getMonth() + 12);
+
             $.ajax({
                 url: br_calendar.ajax_url,
                 type: 'POST',
                 data: {
                     action: 'br_get_calendar_data',
                     nonce: br_calendar.nonce,
-                    start_date: this.formatDate(startDate),
-                    end_date: this.formatDate(endDate)
+                    start_date: startDate.toISOString().split('T')[0],
+                    end_date: endDate.toISOString().split('T')[0]
                 },
                 success: function(response) {
                     if (response.success) {
-                        self.calendarData = response.data;
-                        self.renderMonths();
-                        self.container.find('.br-calendar-loading').hide();
+                        self.pricingData = response.data.pricing_data || {};
+                        self.bookedDates = response.data.booked_dates || [];
+                        self.startDayNumber = response.data.start_day || self.startDayNumber;
+                        console.log('Calendar data loaded. Start day:', self.startDayNumber);
+                        self.renderCalendar();
+                    } else {
+                        self.showError(response.data || 'Failed to load calendar data');
                     }
                 },
                 error: function() {
@@ -168,284 +78,390 @@ jQuery(document).ready(function($) {
                 }
             });
         }
-        
-        renderMonths() {
-            const wrapper = this.container.find('.br-calendar-months-wrapper');
-            wrapper.empty();
+
+        renderCalendar() {
+            const calendarHTML = `
+                <div class="br-calendar-header">
+                    <h2>${br_calendar.strings.select_week}</h2>
+                    <p>Select your check-in date (${this.getDayName(this.startDayNumber)})</p>
+                </div>
+                <div class="br-month-navigation">
+                    <button class="br-nav-button prev-month">Previous Month</button>
+                    <span class="br-current-months"></span>
+                    <button class="br-nav-button next-month">Next Month</button>
+                </div>
+                <div class="br-calendar-container"></div>
+                <div class="br-selected-weeks" style="display:none;">
+                    <h3>Selected Weeks</h3>
+                    <div class="br-selected-weeks-list"></div>
+                    <div class="br-total-price"></div>
+                </div>
+                <div class="br-booking-form" style="display:none;">
+                    <h3>Guest Information</h3>
+                    <form class="br-booking-form-inner">
+                        <div class="br-form-row">
+                            <div class="br-form-group">
+                                <label for="br-first-name">First Name *</label>
+                                <input type="text" id="br-first-name" name="first_name" required>
+                            </div>
+                            <div class="br-form-group">
+                                <label for="br-last-name">Last Name *</label>
+                                <input type="text" id="br-last-name" name="last_name" required>
+                            </div>
+                        </div>
+                        <div class="br-form-row">
+                            <div class="br-form-group">
+                                <label for="br-email">Email *</label>
+                                <input type="email" id="br-email" name="email" required>
+                            </div>
+                            <div class="br-form-group">
+                                <label for="br-phone">Phone *</label>
+                                <input type="tel" id="br-phone" name="phone" required>
+                            </div>
+                        </div>
+                        <div class="br-form-group">
+                            <label for="br-message">Message (Optional)</label>
+                            <textarea id="br-message" name="message"></textarea>
+                        </div>
+                        <button type="submit" class="br-submit-button">Submit Booking Request</button>
+                    </form>
+                </div>
+            `;
+
+            $(this.container).html(calendarHTML);
+            this.updateMonthDisplay();
+        }
+
+        updateMonthDisplay() {
+            const today = new Date();
+            const startMonth = new Date(today.getFullYear(), today.getMonth() + this.currentOffset, 1);
+            const endMonth = new Date(today.getFullYear(), today.getMonth() + this.currentOffset + this.monthsToShow - 1, 1);
+
+            // Update navigation
+            const navText = startMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            const endText = endMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
             
+            if (startMonth.getMonth() === endMonth.getMonth() && startMonth.getFullYear() === endMonth.getFullYear()) {
+                $(this.container).find('.br-current-months').text(navText);
+            } else if (startMonth.getFullYear() === endMonth.getFullYear()) {
+                $(this.container).find('.br-current-months').text(
+                    `${startMonth.toLocaleDateString('en-US', { month: 'long' })} - ${endText}`
+                );
+            } else {
+                $(this.container).find('.br-current-months').text(`${navText} - ${endText}`);
+            }
+
+            // Disable prev button if at start
+            $(this.container).find('.prev-month').prop('disabled', this.currentOffset <= 0);
+
+            this.renderMonths();
+        }
+
+        renderMonths() {
+            const calendarContainer = $(this.container).find('.br-calendar-container')[0];
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             
-            for (let i = 0; i < this.visibleMonths; i++) {
-                const monthDate = new Date(today.getFullYear(), today.getMonth() + this.currentMonthOffset + i, 1);
-                wrapper.append(this.renderMonth(monthDate));
+            let monthsHTML = '<div class="br-months-wrapper">';
+
+            for (let i = 0; i < this.monthsToShow; i++) {
+                const monthOffset = this.currentOffset + i;
+                const monthDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
+                monthsHTML += this.renderMonth(monthDate, today);
             }
+
+            monthsHTML += '</div>';
             
-            this.updateNavigation();
-            this.updateNavMonths();
-        }
-        
-        renderMonth(date) {
-            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
-                               'July', 'August', 'September', 'October', 'November', 'December'];
-            const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
-            
-            const year = date.getFullYear();
-            const month = date.getMonth();
-            const firstDay = new Date(year, month, 1).getDay();
-            const daysInMonth = new Date(year, month + 1, 0).getDate();
-            
-            let html = `
-                <div class="br-calendar-month">
-                    <div class="br-month-header">
-                        <h4>${monthNames[month]} ${year}</h4>
+            // Add legend
+            monthsHTML += `
+                <div class="br-calendar-legend">
+                    <div class="br-legend-item">
+                        <div class="br-legend-color available"></div>
+                        <span>Available</span>
                     </div>
-                    <div class="br-month-grid">
-                        <div class="br-weekdays">
+                    <div class="br-legend-item">
+                        <div class="br-legend-color selected"></div>
+                        <span>Selected</span>
+                    </div>
+                    <div class="br-legend-item">
+                        <div class="br-legend-color pending"></div>
+                        <span>Pending</span>
+                    </div>
+                    <div class="br-legend-item">
+                        <div class="br-legend-color booked"></div>
+                        <span>Booked</span>
+                    </div>
+                </div>
             `;
             
-            // Weekday headers
-            for (let day of dayNames) {
-                html += `<div class="br-weekday">${day}</div>`;
-            }
-            html += '</div><div class="br-days">';
+            calendarContainer.innerHTML = monthsHTML;
+
+            // Add click handlers
+            this.attachDayClickHandlers();
             
-            // Empty cells before first day
-            for (let i = 0; i < firstDay; i++) {
-                html += '<div class="br-day br-empty"></div>';
+            // Highlight selected weeks
+            this.selectedWeeks.forEach(week => {
+                const startDate = new Date(week.start);
+                const endDate = new Date(week.end);
+                
+                // Highlight all 7 days of the selected week
+                let currentDate = new Date(startDate);
+                while (currentDate <= endDate) {
+                    const dayElement = this.container.querySelector(`[data-date="${currentDate.toISOString().split('T')[0]}"]`);
+                    if (dayElement) {
+                        dayElement.classList.add('br-selected');
+                    }
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+            });
+
+            // Add pending status styling
+            this.bookedDates.forEach(dateInfo => {
+                if (typeof dateInfo === 'object' && dateInfo.status === 'pending') {
+                    const dayElement = this.container.querySelector(`[data-date="${dateInfo.date}"]`);
+                    if (dayElement) {
+                        dayElement.classList.remove('br-booked');
+                        dayElement.classList.add('br-pending');
+                    }
+                } else {
+                    // Legacy support for simple date strings
+                    const dayElement = this.container.querySelector(`[data-date="${dateInfo}"]`);
+                    if (dayElement) {
+                        dayElement.classList.add('br-booked');
+                    }
+                }
+            });
+        }
+
+        renderMonth(monthDate, today) {
+            const year = monthDate.getFullYear();
+            const month = monthDate.getMonth();
+            const firstDay = new Date(year, month, 1);
+            const lastDay = new Date(year, month + 1, 0);
+            const startingDayOfWeek = firstDay.getDay();
+            
+            let html = '<div class="br-month">';
+            html += `<div class="br-month-header">${monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>`;
+            html += '<div class="br-calendar-grid">';
+            
+            // Day headers
+            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            dayNames.forEach(day => {
+                html += `<div class="br-day-name">${day}</div>`;
+            });
+            
+            // Empty cells for days before month starts
+            for (let i = 0; i < startingDayOfWeek; i++) {
+                const prevMonthDay = new Date(year, month, -startingDayOfWeek + i + 1);
+                html += this.renderDay(prevMonthDay, today, true);
             }
             
-            // Days of month
-            for (let day = 1; day <= daysInMonth; day++) {
+            // Days of the month
+            for (let day = 1; day <= lastDay.getDate(); day++) {
                 const currentDate = new Date(year, month, day);
-                const dateStr = this.formatDate(currentDate);
-                const dayOfWeek = currentDate.getDay();
-                const isStartDay = dayOfWeek === this.startDayNumber;
-                
-                let classes = ['br-day'];
-                let content = `<span class="br-day-number">${day}</span>`;
-                
-                // Check if this date is part of any selected week
-                const weekInfo = this.getWeekForDate(currentDate);
-                if (weekInfo && this.isWeekSelected(weekInfo.start)) {
-                    classes.push('br-selected');
-                    if (dateStr === weekInfo.start) {
-                        classes.push('br-selected-start');
-                    }
-                    if (dateStr === weekInfo.end) {
-                        classes.push('br-selected-end');
-                    }
-                }
-                
-                if (isStartDay) {
-                    const weekData = this.getWeekData(dateStr);
-                    if (weekData) {
-                        classes.push('br-week-start');
-                        
-                        if (weekData.available && !this.isPastDate(currentDate)) {
-                            classes.push('br-available');
-                            content += `<span class="br-day-price">${br_calendar.currency_symbol}${weekData.rate.toLocaleString()}</span>`;
-                        } else {
-                            classes.push('br-unavailable');
-                        }
-                    }
-                }
-                
-                if (this.isPastDate(currentDate)) {
-                    classes.push('br-past');
-                }
-                
-                html += `<div class="${classes.join(' ')}" data-date="${dateStr}">${content}</div>`;
+                html += this.renderDay(currentDate, today, false);
             }
             
             // Fill remaining cells
-            const totalCells = firstDay + daysInMonth;
+            const totalCells = startingDayOfWeek + lastDay.getDate();
             const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
-            for (let i = 0; i < remainingCells; i++) {
-                html += '<div class="br-day br-empty"></div>';
+            for (let i = 1; i <= remainingCells; i++) {
+                const nextMonthDay = new Date(year, month + 1, i);
+                html += this.renderDay(nextMonthDay, today, true);
             }
             
-            html += '</div></div></div>';
-            
+            html += '</div></div>';
             return html;
         }
-        
-        bindEvents() {
+
+        renderDay(date, today, isOtherMonth) {
+            const dateStr = date.toISOString().split('T')[0];
+            const dayOfWeek = date.getDay();
+            const isPast = date < today;
+            const isStartDay = dayOfWeek === this.startDayNumber;
+            const pricingInfo = this.pricingData[dateStr];
+            
+            let classes = ['br-calendar-day'];
+            if (isOtherMonth) classes.push('br-other-month');
+            if (isPast) classes.push('br-past');
+            if (isStartDay && !isPast && pricingInfo && pricingInfo.available) {
+                classes.push('br-week-start', 'br-week-available');
+            }
+            
+            let html = `<div class="${classes.join(' ')}" data-date="${dateStr}">`;
+            html += `<div class="br-day-number">${date.getDate()}</div>`;
+            
+            if (isStartDay && pricingInfo && !isPast && !isOtherMonth) {
+                const formattedPrice = br_calendar.currency_symbol + 
+                    new Intl.NumberFormat('en-US').format(pricingInfo.rate);
+                html += `<div class="br-day-price">${formattedPrice}</div>`;
+            }
+            
+            html += '</div>';
+            return html;
+        }
+
+        getDayName(dayNumber) {
+            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            return days[dayNumber];
+        }
+
+        attachDayClickHandlers() {
             const self = this;
-            
-            // Navigation
-            this.container.on('click', '.br-nav-prev', function() {
-                if (!$(this).prop('disabled')) {
-                    self.currentMonthOffset -= self.visibleMonths;
-                    self.renderMonths();
-                }
-            });
-            
-            this.container.on('click', '.br-nav-next', function() {
-                if (!$(this).prop('disabled')) {
-                    self.currentMonthOffset += self.visibleMonths;
-                    self.renderMonths();
-                }
-            });
-            
-            // Week selection
-            this.container.on('click', '.br-week-start.br-available:not(.br-past)', function() {
-                const startDate = $(this).data('date');
-                self.toggleWeek(startDate);
-            });
-            
-            // Continue to booking
-            this.container.on('click', '.br-continue-booking', function() {
-                self.showBookingForm();
-            });
-            
-            // Form submission
-            this.container.on('submit', '#br-booking-form-v3', function(e) {
-                e.preventDefault();
-                self.submitBooking();
-            });
-            
-            // Change dates
-            this.container.on('click', '.br-change-dates', function() {
-                self.resetSelection();
+            $(this.container).find('.br-week-start').on('click', function() {
+                const dateStr = $(this).data('date');
+                self.handleWeekSelection(dateStr);
             });
         }
-        
-        toggleWeek(startDate) {
-            const weekIndex = this.selectedWeeks.findIndex(week => week.start === startDate);
+
+        handleWeekSelection(startDateStr) {
+            const startDate = new Date(startDateStr);
+            const endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + 6); // 6 nights
             
-            if (weekIndex > -1) {
-                // Remove week
-                this.selectedWeeks.splice(weekIndex, 1);
-            } else if (this.selectedWeeks.length < this.maxWeeks) {
-                // Add week - Parse the date properly as local date
-                const start = this.parseDate(startDate);
-                const end = new Date(start);
-                end.setDate(end.getDate() + 6); // Exactly 6 days later for 7 nights
+            const weekKey = startDateStr;
+            const existingIndex = this.selectedWeeks.findIndex(w => w.start === weekKey);
+            
+            if (existingIndex !== -1) {
+                // Remove week if already selected
+                this.selectedWeeks.splice(existingIndex, 1);
+            } else {
+                // Check if we've reached the maximum
+                if (this.selectedWeeks.length >= this.maxWeeks) {
+                    this.showError(`You can select a maximum of ${this.maxWeeks} weeks`);
+                    return;
+                }
                 
-                const weekData = this.getWeekData(startDate);
-                if (weekData && weekData.available) {
+                // Add week
+                const pricingInfo = this.pricingData[startDateStr];
+                if (pricingInfo && pricingInfo.available) {
                     this.selectedWeeks.push({
-                        start: startDate,
-                        end: this.formatDate(end),
-                        rate: weekData.rate
+                        start: startDateStr,
+                        end: endDate.toISOString().split('T')[0],
+                        rate: pricingInfo.rate
                     });
                     
-                    // Sort weeks by start date
-                    this.selectedWeeks.sort((a, b) => this.parseDate(a.start) - this.parseDate(b.start));
+                    // Sort by date
+                    this.selectedWeeks.sort((a, b) => new Date(a.start) - new Date(b.start));
+                } else {
+                    this.showError(br_calendar.strings.week_unavailable);
+                    return;
                 }
-            } else {
-                alert(`You can select a maximum of ${this.maxWeeks} weeks`);
-                return;
             }
             
             this.renderMonths();
             this.updateSelectedWeeksSummary();
         }
-        
+
         updateSelectedWeeksSummary() {
-            const summary = this.container.find('.br-selected-weeks-summary');
-            const weeksList = summary.find('.br-weeks-list');
+            const container = $(this.container).find('.br-selected-weeks');
+            const list = container.find('.br-selected-weeks-list');
             
             if (this.selectedWeeks.length === 0) {
-                summary.hide();
-                this.container.find('.br-booking-form-container').hide();
+                container.hide();
+                $(this.container).find('.br-booking-form').hide();
                 return;
             }
             
-            weeksList.empty();
+            container.show();
+            $(this.container).find('.br-booking-form').show();
+            
+            let html = '';
             let totalPrice = 0;
             
             this.selectedWeeks.forEach((week, index) => {
-                const startDate = this.parseDate(week.start);
-                const endDate = this.parseDate(week.end);
+                const startDate = new Date(week.start);
+                const endDate = new Date(week.end);
+                const formattedStart = startDate.toLocaleDateString('en-US', { 
+                    weekday: 'short', 
+                    month: 'short', 
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+                const formattedEnd = endDate.toLocaleDateString('en-US', { 
+                    weekday: 'short', 
+                    month: 'short', 
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+                const formattedPrice = br_calendar.currency_symbol + 
+                    new Intl.NumberFormat('en-US').format(week.rate);
                 
-                // Debug log
-                console.log(`Week ${index + 1}: Start=${week.start} (${this.formatDisplayDate(startDate)}), End=${week.end} (${this.formatDisplayDate(endDate)})`);
-                
-                weeksList.append(`
+                html += `
                     <div class="br-week-item">
-                        <span class="br-week-dates">
-                            ${this.formatDisplayDate(startDate)} - ${this.formatDisplayDate(endDate)}
-                        </span>
-                        <span class="br-week-price">${br_calendar.currency_symbol}${week.rate.toLocaleString()}</span>
+                        <span class="br-week-dates">${formattedStart} - ${formattedEnd}</span>
+                        <span class="br-week-price">${formattedPrice}</span>
                         <button class="br-remove-week" data-index="${index}">×</button>
                     </div>
-                `);
+                `;
                 
                 totalPrice += week.rate;
             });
             
-            summary.find('.br-week-count').text(this.selectedWeeks.length);
-            summary.find('.br-price-total').text(br_calendar.currency_symbol + totalPrice.toLocaleString());
-            summary.show();
+            list.html(html);
             
-            // Show continue button
-            if (!summary.find('.br-continue-booking').length) {
-                summary.append('<button class="br-continue-booking br-btn-primary">Continue to Booking</button>');
-            }
+            const formattedTotal = br_calendar.currency_symbol + 
+                new Intl.NumberFormat('en-US').format(totalPrice);
+            container.find('.br-total-price').html(`Total: ${formattedTotal}`);
             
-            // Handle remove week - need to use 'self' reference
+            // Bind remove handlers
             const self = this;
-            weeksList.find('.br-remove-week').off('click').on('click', function() {
+            container.find('.br-remove-week').on('click', function() {
                 const index = $(this).data('index');
-                const week = self.selectedWeeks[index];
-                self.toggleWeek(week.start);
+                self.selectedWeeks.splice(index, 1);
+                self.renderMonths();
+                self.updateSelectedWeeksSummary();
             });
         }
-        
-        showBookingForm() {
-            this.container.find('.br-booking-form-container').slideDown();
+
+        bindEvents() {
+            const self = this;
             
-            // Prepare booking data
-            const bookingData = {
-                weeks: this.selectedWeeks,
-                total_weeks: this.selectedWeeks.length,
-                total_price: this.selectedWeeks.reduce((sum, week) => sum + week.rate, 0)
-            };
+            // Navigation
+            $(this.container).on('click', '.prev-month', function() {
+                if (self.currentOffset > 0) {
+                    self.currentOffset -= self.monthsToShow;
+                    self.updateMonthDisplay();
+                }
+            });
             
-            $('#br-booking-weeks').val(JSON.stringify(bookingData));
+            $(this.container).on('click', '.next-month', function() {
+                self.currentOffset += self.monthsToShow;
+                self.updateMonthDisplay();
+            });
             
-            // Scroll to form
-            $('html, body').animate({
-                scrollTop: this.container.find('.br-booking-form-container').offset().top - 100
-            }, 500);
+            // Form submission
+            $(this.container).on('submit', '.br-booking-form-inner', function(e) {
+                e.preventDefault();
+                self.submitBooking();
+            });
         }
-        
-        resetSelection() {
-            this.selectedWeeks = [];
-            this.renderMonths();
-            this.updateSelectedWeeksSummary();
-            this.container.find('#br-booking-form-v3')[0].reset();
-        }
-        
+
         submitBooking() {
             const self = this;
-            const form = $('#br-booking-form-v3');
-            const submitBtn = form.find('.br-btn-primary');
+            const form = $(this.container).find('.br-booking-form-inner');
+            const submitButton = form.find('.br-submit-button');
             
-            if (!form[0].checkValidity()) {
-                form[0].reportValidity();
-                return;
-            }
+            // Disable submit button
+            submitButton.prop('disabled', true).text('Processing...');
             
-            // For now, submit the first week only (until backend supports multi-week)
+            // Get first and last dates from selected weeks
             const firstWeek = this.selectedWeeks[0];
+            const lastWeek = this.selectedWeeks[this.selectedWeeks.length - 1];
             
-            submitBtn.prop('disabled', true);
-            submitBtn.find('.btn-text').hide();
-            submitBtn.find('.btn-loading').show();
-            
+            // Prepare data
             const formData = {
                 action: 'br_submit_calendar_booking',
                 nonce: br_calendar.nonce,
-                first_name: form.find('[name="first_name"]').val(),
-                last_name: form.find('[name="last_name"]').val(),
-                email: form.find('[name="email"]').val(),
-                phone: form.find('[name="phone"]').val(),
-                details: form.find('[name="details"]').val() + '\n\nMultiple weeks selected: ' + JSON.stringify(this.selectedWeeks),
+                first_name: form.find('#br-first-name').val(),
+                last_name: form.find('#br-last-name').val(),
+                email: form.find('#br-email').val(),
+                phone: form.find('#br-phone').val(),
+                message: form.find('#br-message').val(),
                 checkin_date: firstWeek.start,
-                checkout_date: firstWeek.end
+                checkout_date: lastWeek.end,
+                weeks_data: JSON.stringify(this.selectedWeeks),
+                total_price: this.selectedWeeks.reduce((sum, week) => sum + week.rate, 0)
             };
             
             $.ajax({
@@ -454,145 +470,61 @@ jQuery(document).ready(function($) {
                 data: formData,
                 success: function(response) {
                     if (response.success) {
-                        self.showMessage(response.data.message, 'success');
+                        self.showSuccess(response.data.message || br_calendar.strings.booking_submitted);
+                        // Reset form and selection
                         form[0].reset();
-                        
-                        setTimeout(() => {
-                            self.resetSelection();
-                            self.loadCalendarData();
-                        }, 3000);
+                        self.selectedWeeks = [];
+                        self.renderMonths();
+                        self.updateSelectedWeeksSummary();
+                        // Reload calendar data to show new booking
+                        setTimeout(() => self.loadCalendarData(), 2000);
                     } else {
-                        self.showMessage(response.data.message, 'error');
+                        self.showError(response.data || br_calendar.strings.error);
                     }
                 },
                 error: function() {
-                    self.showMessage('An error occurred. Please try again.', 'error');
+                    self.showError(br_calendar.strings.error);
                 },
                 complete: function() {
-                    submitBtn.prop('disabled', false);
-                    submitBtn.find('.btn-text').show();
-                    submitBtn.find('.btn-loading').hide();
+                    submitButton.prop('disabled', false).text('Submit Booking Request');
                 }
             });
         }
-        
-        // Helper methods
-        getWeekForDate(date) {
-            // This function should return the week that starts on the clicked date
-            // The clicked date IS the start date if it's a start day
-            const dayOfWeek = date.getDay();
-            
-            if (dayOfWeek === this.startDayNumber) {
-                // This IS a start day, so the week starts on this date
-                const weekStart = new Date(date);
-                const weekEnd = new Date(weekStart);
-                weekEnd.setDate(weekEnd.getDate() + 6);
-                
-                return {
-                    start: this.formatDate(weekStart),
-                    end: this.formatDate(weekEnd)
-                };
-            }
-            
-            // Not a start day - find the previous start day
-            const daysFromStart = (dayOfWeek - this.startDayNumber + 7) % 7;
-            const weekStart = new Date(date);
-            weekStart.setDate(weekStart.getDate() - daysFromStart);
-            
-            const weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekEnd.getDate() + 6);
-            
-            return {
-                start: this.formatDate(weekStart),
-                end: this.formatDate(weekEnd)
-            };
+
+        showError(message) {
+            this.showMessage(message, 'error');
         }
-        
-        isWeekSelected(startDate) {
-            return this.selectedWeeks.some(week => week.start === startDate);
+
+        showSuccess(message) {
+            this.showMessage(message, 'success');
         }
-        
-        updateNavigation() {
-            const prevBtn = this.container.find('.br-nav-prev');
-            const nextBtn = this.container.find('.br-nav-next');
-            
-            // Disable previous button if we're at the current month or earlier
-            const today = new Date();
-            const firstVisibleMonth = new Date(today.getFullYear(), today.getMonth() + this.currentMonthOffset, 1);
-            const currentMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-            
-            prevBtn.prop('disabled', firstVisibleMonth <= currentMonth);
-            nextBtn.prop('disabled', this.currentMonthOffset + this.visibleMonths >= this.maxMonthsAhead);
-        }
-        
-        updateNavMonths() {
-            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                               'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            const today = new Date();
-            const firstMonth = new Date(today.getFullYear(), today.getMonth() + this.currentMonthOffset, 1);
-            const lastMonth = new Date(today.getFullYear(), today.getMonth() + this.currentMonthOffset + this.visibleMonths - 1, 1);
-            
-            const text = `${monthNames[firstMonth.getMonth()]} ${firstMonth.getFullYear()} - ${monthNames[lastMonth.getMonth()]} ${lastMonth.getFullYear()}`;
-            this.container.find('.br-nav-months').text(text);
-        }
-        
-        getWeekData(dateStr) {
-            if (!this.calendarData || !this.calendarData.pricing_data) {
-                return null;
-            }
-            return this.calendarData.pricing_data[dateStr] || null;
-        }
-        
-        isPastDate(date) {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            return date < today;
-        }
-        
-        formatDate(date) {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            return `${year}-${month}-${day}`;
-        }
-        
-        parseDate(dateStr) {
-            // Parse date string as local date, not UTC
-            const [year, month, day] = dateStr.split('-').map(num => parseInt(num));
-            return new Date(year, month - 1, day);
-        }
-        
-        formatDisplayDate(date) {
-            // Ensure we're working with a valid date object
-            if (!(date instanceof Date) || isNaN(date)) {
-                console.error('Invalid date passed to formatDisplayDate:', date);
-                return 'Invalid Date';
-            }
-            
-            const options = { weekday: 'short', month: 'short', day: 'numeric' };
-            return date.toLocaleDateString('en-US', options);
-        }
-        
+
         showMessage(message, type) {
-            const messageDiv = this.container.find('.br-form-message');
-            messageDiv.removeClass('success error').addClass(type).html(message).show();
+            // Remove any existing messages
+            $(this.container).find('.br-message').remove();
             
+            const messageHtml = `<div class="br-message ${type}">${message}</div>`;
+            $(this.container).prepend(messageHtml);
+            
+            // Scroll to message
+            $('html, body').animate({
+                scrollTop: $(this.container).offset().top - 100
+            }, 300);
+            
+            // Auto-hide after 5 seconds
             setTimeout(() => {
-                messageDiv.fadeOut();
+                $(this.container).find('.br-message').fadeOut(() => {
+                    $(this.container).find('.br-message').remove();
+                });
             }, 5000);
         }
-        
-        showError(message) {
-            this.container.find('.br-calendar-loading').html(
-                '<div class="br-error-message">' + message + '</div>'
-            );
-        }
     }
-    
-    // Initialize calendars - one instance per widget
-    $('.br-calendar-widget').each(function(index) {
-        // Add unique identifier to prevent overlap
-        $(this).addClass('br-calendar-instance-' + index);
-        new BookingCalendarV3(this);
+
+    // Initialize all calendar widgets on page
+    $(document).ready(function() {
+        $('.br-calendar-widget').each(function() {
+            new BookingCalendarV3(this);
+        });
     });
-});
+
+})(jQuery);

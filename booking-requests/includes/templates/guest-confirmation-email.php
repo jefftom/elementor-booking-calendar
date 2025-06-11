@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Booking Request Received</title>
+    <title>Booking Request Received - <?php echo esc_html($guest_name); ?></title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -58,24 +58,6 @@
             font-weight: bold;
             color: #555;
         }
-        .weeks-list {
-            list-style: none;
-            padding: 0;
-            margin: 10px 0;
-        }
-        .weeks-list li {
-            background: #e9ecef;
-            padding: 10px;
-            margin: 5px 0;
-            border-radius: 4px;
-        }
-        .total-price {
-            font-size: 24px;
-            color: #27ae60;
-            font-weight: bold;
-            text-align: center;
-            margin: 20px 0;
-        }
         .footer {
             background-color: #f8f9fa;
             padding: 20px;
@@ -93,7 +75,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Booking Request Received!</h1>
+            <h1>Booking Request Received</h1>
         </div>
         
         <div class="content">
@@ -118,25 +100,10 @@
                     <span class="detail-label">Total Nights:</span>
                     <span><?php echo $nights; ?> nights</span>
                 </div>
-                
-                <?php if (!empty($weeks_info)): ?>
-                    <div style="margin-top: 20px;">
-                        <strong>Selected Weeks:</strong>
-                        <?php echo $weeks_info; ?>
-                    </div>
-                <?php endif; ?>
-            </div>
-            
-            <div class="total-price">
-                Total: <?php echo isset($total_price) ? esc_html($total_price) : esc_html($total_price_formatted); ?>
             </div>
             
             <p><strong>What happens next?</strong></p>
-            <ul>
-                <li>Our team will review your booking request</li>
-                <li>You will receive an email within 24-48 hours with the status of your booking</li>
-                <li>If approved, you will receive payment instructions</li>
-            </ul>
+            <p>Our team will review your booking request and you will receive an email within 24-48 hours with the status of your booking. If approved, you will receive payment instructions at that time.</p>
             
             <p>If you have any questions in the meantime, please don't hesitate to contact us.</p>
         </div>
