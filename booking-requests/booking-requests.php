@@ -3,7 +3,7 @@
  * Plugin Name: Booking Requests
  * Plugin URI: https://example.com/booking-requests
  * Description: Captures booking requests via Gravity Forms with custom dashboard and email approval workflow
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: Your Name
  * Author URI: https://example.com
  * License: GPL-2.0+
@@ -17,10 +17,11 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('BR_PLUGIN_VERSION', '1.0.0');
+define('BR_PLUGIN_VERSION', '1.1.0');
 define('BR_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('BR_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('BR_PLUGIN_BASENAME', plugin_basename(__FILE__));
+define('BR_TIMEZONE', 'Europe/Istanbul'); // UTC+3
 
 // Activation hook
 register_activation_hook(__FILE__, 'br_activate');
@@ -35,6 +36,7 @@ function br_activate() {
     add_option('br_approval_required', '1');
     add_option('br_calendar_months_to_show', '12');
     add_option('br_calendar_min_advance_days', '1');
+    add_option('br_min_nights', '3'); // Changed from 7 to 3
     
     // Flush rewrite rules
     flush_rewrite_rules();
@@ -50,11 +52,11 @@ function br_deactivate() {
 // Initialize plugin
 add_action('plugins_loaded', 'br_init');
 function br_init() {
+    // Set default timezone to UTC+3
+    date_default_timezone_set(BR_TIMEZONE);
+    
     // Load text domain
     load_plugin_textdomain('booking-requests', false, dirname(BR_PLUGIN_BASENAME) . '/languages');
-	
-	
-	
     
     // Check if required plugins are active
     if (!function_exists('is_plugin_active')) {
@@ -174,16 +176,22 @@ function br_admin_enqueue_scripts($hook) {
     wp_enqueue_style('br-admin-styles', BR_PLUGIN_URL . 'admin/css/admin-styles.css', array(), BR_PLUGIN_VERSION);
     wp_enqueue_script('br-admin-scripts', BR_PLUGIN_URL . 'admin/js/admin-scripts.js', array('jquery'), BR_PLUGIN_VERSION, true);
     
+    // Add jQuery UI for datepicker
+    wp_enqueue_script('jquery-ui-datepicker');
+    wp_enqueue_style('jquery-ui', 'https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css');
+    
     // Localize script
     wp_localize_script('br-admin-scripts', 'br_admin', array(
         'ajax_url' => admin_url('admin-ajax.php'),
         'nonce' => wp_create_nonce('br_admin_nonce'),
+        'min_nights' => get_option('br_min_nights', '3'),
         'strings' => array(
             'confirm_approve' => __('Are you sure you want to approve this booking?', 'booking-requests'),
             'confirm_deny' => __('Are you sure you want to deny this booking?', 'booking-requests'),
             'confirm_delete' => __('Are you sure you want to delete this booking?', 'booking-requests'),
             'processing' => __('Processing...', 'booking-requests'),
-            'error' => __('An error occurred. Please try again.', 'booking-requests')
+            'error' => __('An error occurred. Please try again.', 'booking-requests'),
+            'min_nights_error' => sprintf(__('Minimum stay is %d nights', 'booking-requests'), get_option('br_min_nights', '3'))
         )
     ));
 }
@@ -211,14 +219,20 @@ function br_public_enqueue_scripts() {
             'start_day' => $start_day_number,
             'months_to_show' => get_option('br_calendar_months_to_show', '12'),
             'min_advance_days' => get_option('br_calendar_min_advance_days', '1'),
+            'min_nights' => get_option('br_min_nights', '3'),
             'currency_symbol' => '€',
+            'timezone' => BR_TIMEZONE,
             'strings' => array(
-                'select_week' => __('Select Week', 'booking-requests'),
-                'week_unavailable' => __('This week is not available', 'booking-requests'),
+                'select_dates' => __('Select Dates', 'booking-requests'),
+                'dates_unavailable' => __('These dates are not available', 'booking-requests'),
                 'loading' => __('Loading...', 'booking-requests'),
                 'error' => __('An error occurred. Please try again.', 'booking-requests'),
                 'booking_submitted' => __('Your booking request has been submitted!', 'booking-requests'),
-                'please_fill_all' => __('Please fill in all required fields', 'booking-requests')
+                'please_fill_all' => __('Please fill in all required fields', 'booking-requests'),
+                'min_nights_error' => sprintf(__('Minimum stay is %d nights', 'booking-requests'), get_option('br_min_nights', '3')),
+                'available' => __('Available', 'booking-requests'),
+                'selected' => __('Selected', 'booking-requests'),
+                'booked' => __('Booked', 'booking-requests')
             )
         ));
     }
@@ -289,7 +303,8 @@ function br_booking_calendar_shortcode($atts) {
     $atts = shortcode_atts(array(
         'start_day' => get_option('br_week_start_day', 'saturday'),
         'months' => get_option('br_calendar_months_to_show', '12'),
-        'min_advance' => get_option('br_calendar_min_advance_days', '1')
+        'min_advance' => get_option('br_calendar_min_advance_days', '1'),
+        'show_form' => 'yes'
     ), $atts);
     
     ob_start();
@@ -297,8 +312,16 @@ function br_booking_calendar_shortcode($atts) {
     <div class="br-calendar-widget" 
          data-start-day="<?php echo esc_attr($atts['start_day']); ?>"
          data-months="<?php echo esc_attr($atts['months']); ?>"
-         data-min-advance="<?php echo esc_attr($atts['min_advance']); ?>">
-        <div class="br-calendar-loading"><?php _e('Loading calendar...', 'booking-requests'); ?></div>
+         data-min-advance="<?php echo esc_attr($atts['min_advance']); ?>"
+         data-show-form="<?php echo esc_attr($atts['show_form']); ?>">
+        <div class="br-calendar-container">
+            <div class="br-calendar-loading"><?php _e('Loading calendar...', 'booking-requests'); ?></div>
+        </div>
+        <?php if ($atts['show_form'] === 'yes'): ?>
+        <div class="br-calendar-form-container">
+            <!-- Form will be loaded here -->
+        </div>
+        <?php endif; ?>
     </div>
     <?php
     return ob_get_clean();
@@ -446,6 +469,9 @@ if (defined('WP_DEBUG') && WP_DEBUG) {
             echo 'Plugin Version: ' . BR_PLUGIN_VERSION . PHP_EOL;
             echo 'WordPress Version: ' . get_bloginfo('version') . PHP_EOL;
             echo 'PHP Version: ' . phpversion() . PHP_EOL;
+            echo 'Timezone: ' . BR_TIMEZONE . PHP_EOL;
+            echo 'Current Time: ' . current_time('mysql') . PHP_EOL;
+            echo 'Min Nights: ' . get_option('br_min_nights', '3') . PHP_EOL;
             echo 'Gravity Forms Active: ' . (class_exists('GFForms') ? 'Yes' : 'No') . PHP_EOL;
             echo 'Elementor Active: ' . (did_action('elementor/loaded') ? 'Yes' : 'No') . PHP_EOL;
             echo '</pre>';

@@ -13,6 +13,10 @@ class BR_Booking_Calendar_Widget {
         // AJAX handler for booking submission (handled by form handler)
         add_action('wp_ajax_br_submit_calendar_booking', array($this, 'ajax_submit_booking'));
         add_action('wp_ajax_nopriv_br_submit_calendar_booking', array($this, 'ajax_submit_booking'));
+        
+        // AJAX handler for price calculation
+        add_action('wp_ajax_br_calculate_price', array($this, 'ajax_calculate_price'));
+        add_action('wp_ajax_nopriv_br_calculate_price', array($this, 'ajax_calculate_price'));
     }
     
     /**
@@ -22,7 +26,8 @@ class BR_Booking_Calendar_Widget {
         $atts = shortcode_atts(array(
             'start_day' => get_option('br_week_start_day', 'saturday'),
             'months' => get_option('br_calendar_months_to_show', '12'),
-            'min_advance' => get_option('br_calendar_min_advance_days', '1')
+            'min_advance' => get_option('br_calendar_min_advance_days', '1'),
+            'show_form' => 'yes'
         ), $atts);
         
         ob_start();
@@ -30,8 +35,16 @@ class BR_Booking_Calendar_Widget {
         <div class="br-calendar-widget" 
              data-start-day="<?php echo esc_attr($atts['start_day']); ?>"
              data-months="<?php echo esc_attr($atts['months']); ?>"
-             data-min-advance="<?php echo esc_attr($atts['min_advance']); ?>">
-            <div class="br-calendar-loading"><?php _e('Loading calendar...', 'booking-requests'); ?></div>
+             data-min-advance="<?php echo esc_attr($atts['min_advance']); ?>"
+             data-show-form="<?php echo esc_attr($atts['show_form']); ?>">
+            <div class="br-calendar-container">
+                <div class="br-calendar-loading"><?php _e('Loading calendar...', 'booking-requests'); ?></div>
+            </div>
+            <?php if ($atts['show_form'] === 'yes'): ?>
+            <div class="br-calendar-form-container">
+                <!-- Form will be loaded here by JavaScript -->
+            </div>
+            <?php endif; ?>
         </div>
         <?php
         return ob_get_clean();
@@ -41,6 +54,9 @@ class BR_Booking_Calendar_Widget {
      * AJAX handler to get calendar data
      */
     public function ajax_get_calendar_data() {
+        // Set timezone to UTC+3
+        date_default_timezone_set(BR_TIMEZONE);
+        
         // Verify nonce
         if (!wp_verify_nonce($_POST['nonce'], 'br_calendar_nonce')) {
             wp_send_json_error('Invalid nonce');
@@ -57,13 +73,15 @@ class BR_Booking_Calendar_Widget {
         $pricing_engine = new BR_Pricing_Engine();
         $pricing_data = array();
         
-        // Generate dates for each week start day (Sunday or Saturday)
+        // Generate dates for pricing periods
         $current = new DateTime($start_date);
         $end = new DateTime($end_date);
         
-        // Move to first start day
-        while ($current->format('w') != $start_day_number) {
-            $current->modify('+1 day');
+        // Move to first start day (if needed)
+        if ($start_day === 'saturday' && $current->format('w') != 6) {
+            $current->modify('next saturday');
+        } elseif ($start_day === 'sunday' && $current->format('w') != 0) {
+            $current->modify('next sunday');
         }
         
         // Generate pricing for each week
@@ -87,7 +105,7 @@ class BR_Booking_Calendar_Widget {
         }
         
         // Get booked dates
-        $booked_dates = $this->get_booked_dates($start_date, $end_date);
+        $booked_dates = BR_Database::get_booked_dates($start_date, $end_date);
         
         wp_send_json_success(array(
             'pricing_data' => $pricing_data,
@@ -97,8 +115,48 @@ class BR_Booking_Calendar_Widget {
                 'configured_start_day' => $start_day,
                 'day_number' => $start_day_number,
                 'first_week' => key($pricing_data),
-                'total_weeks' => count($pricing_data)
+                'total_weeks' => count($pricing_data),
+                'timezone' => BR_TIMEZONE,
+                'current_time' => current_time('mysql')
             )
+        ));
+    }
+    
+    /**
+     * AJAX handler for price calculation
+     */
+    public function ajax_calculate_price() {
+        // Verify nonce
+        if (!wp_verify_nonce($_POST['nonce'], 'br_calendar_nonce')) {
+            wp_send_json_error('Invalid nonce');
+        }
+        
+        $checkin = sanitize_text_field($_POST['checkin']);
+        $checkout = sanitize_text_field($_POST['checkout']);
+        
+        if (empty($checkin) || empty($checkout)) {
+            wp_send_json_error(array('message' => __('Please select both dates', 'booking-requests')));
+        }
+        
+        // Calculate nights
+        $checkin_date = new DateTime($checkin);
+        $checkout_date = new DateTime($checkout);
+        $nights = $checkin_date->diff($checkout_date)->days;
+        
+        // Check minimum nights
+        $min_nights = get_option('br_min_nights', 3);
+        if ($nights < $min_nights) {
+            wp_send_json_error(array('message' => sprintf(__('Minimum stay is %d nights', 'booking-requests'), $min_nights)));
+        }
+        
+        // Calculate price
+        $pricing_engine = new BR_Pricing_Engine();
+        $total_price = $pricing_engine->calculate_total_price($checkin, $checkout);
+        
+        wp_send_json_success(array(
+            'total_price' => $total_price,
+            'nights' => $nights,
+            'formatted_total' => '€' . number_format($total_price, 0, ',', '.')
         ));
     }
     
@@ -122,53 +180,7 @@ class BR_Booking_Calendar_Widget {
      * Check availability for dates
      */
     private function check_availability($start_date, $end_date) {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'br_bookings';
-        
-        $conflict = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $table_name 
-            WHERE status IN ('pending', 'approved')
-            AND (
-                (checkin_date <= %s AND checkout_date > %s) OR
-                (checkin_date < %s AND checkout_date >= %s) OR
-                (checkin_date >= %s AND checkout_date <= %s)
-            )",
-            $start_date, $start_date,
-            $end_date, $end_date,
-            $start_date, $end_date
-        ));
-        
-        return $conflict == 0;
-    }
-    
-    /**
-     * Get booked dates
-     */
-    private function get_booked_dates($start_date, $end_date) {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'br_bookings';
-        
-        $bookings = $wpdb->get_results($wpdb->prepare(
-            "SELECT checkin_date, checkout_date FROM $table_name 
-            WHERE status IN ('pending', 'approved')
-            AND checkout_date >= %s 
-            AND checkin_date <= %s",
-            $start_date,
-            $end_date
-        ));
-        
-        $booked_dates = array();
-        foreach ($bookings as $booking) {
-            $current = new DateTime($booking->checkin_date);
-            $end = new DateTime($booking->checkout_date);
-            
-            while ($current < $end) {
-                $booked_dates[] = $current->format('Y-m-d');
-                $current->modify('+1 day');
-            }
-        }
-        
-        return array_unique($booked_dates);
+        return BR_Database::check_availability($start_date, $end_date);
     }
     
     /**
@@ -179,16 +191,9 @@ class BR_Booking_Calendar_Widget {
             'start_day' => get_option('br_week_start_day', 'saturday'),
             'months_to_show' => get_option('br_calendar_months_to_show', '12'),
             'min_advance_days' => get_option('br_calendar_min_advance_days', '1'),
-            'currency_symbol' => '€'
+            'min_nights' => get_option('br_min_nights', '3'),
+            'currency_symbol' => '€',
+            'timezone' => BR_TIMEZONE
         );
-    }
-    
-    /**
-     * Enqueue calendar assets
-     * Note: This is now handled by the main plugin file
-     */
-    public function enqueue_assets() {
-        // Assets are enqueued in booking-requests.php
-        // This method kept for backwards compatibility
     }
 }

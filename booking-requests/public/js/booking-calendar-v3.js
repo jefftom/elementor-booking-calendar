@@ -1,530 +1,576 @@
 (function($) {
     'use strict';
-
-    class BookingCalendarV3 {
-        constructor(container) {
-            this.container = container;
-            this.currentOffset = 0;
-            this.monthsToShow = 2;
-            this.selectedWeeks = [];
-            this.pricingData = {};
-            this.bookedDates = [];
-            this.startDayNumber = 0; // Default to Sunday
-            this.maxWeeks = 8; // Maximum weeks that can be selected
-            
-            this.init();
+    
+    var BookingCalendar = function(element, options) {
+        this.element = element;
+        this.$element = $(element);
+        this.options = $.extend({}, BookingCalendar.DEFAULTS, options);
+        
+        this.selectedStartDate = null;
+        this.selectedEndDate = null;
+        this.bookedDates = {};
+        this.pricingData = {};
+        this.currentMonthOffset = 0;
+        this.maxMonthOffset = 0;
+        
+        this.init();
+    };
+    
+    BookingCalendar.DEFAULTS = {
+        startDay: 6, // Saturday
+        monthsToShow: 12,
+        monthsPerView: 2,
+        minAdvanceDays: 1,
+        minNights: 3,
+        currencySymbol: '€',
+        showForm: true
+    };
+    
+    BookingCalendar.prototype.init = function() {
+        // Calculate max offset
+        this.maxMonthOffset = Math.max(0, this.options.monthsToShow - this.options.monthsPerView);
+        
+        this.loadCalendar();
+        if (this.options.showForm) {
+            this.initForm();
         }
-
-        init() {
-            // Get configuration from data attributes
-            const widgetData = $(this.container).data();
-            const startDay = widgetData.startDay || br_calendar.start_day || 'sunday';
-            
-            // Convert day name to number
-            this.startDayNumber = this.getDayNumber(startDay);
-            
-            console.log('Calendar initialized with start day:', this.startDayNumber, 'from widget:', startDay);
-            
-            this.loadCalendarData();
-            this.bindEvents();
-        }
-
-        getDayNumber(dayName) {
-            const days = {
-                'sunday': 0,
-                'monday': 1,
-                'tuesday': 2,
-                'wednesday': 3,
-                'thursday': 4,
-                'friday': 5,
-                'saturday': 6
-            };
-            
-            if (typeof dayName === 'number') {
-                return dayName;
-            }
-            
-            return days[dayName.toLowerCase()] || 0;
-        }
-
-        loadCalendarData() {
-            const self = this;
-            const startDate = new Date();
-            const endDate = new Date();
-            endDate.setMonth(endDate.getMonth() + 12);
-
-            $.ajax({
-                url: br_calendar.ajax_url,
-                type: 'POST',
-                data: {
-                    action: 'br_get_calendar_data',
-                    nonce: br_calendar.nonce,
-                    start_date: startDate.toISOString().split('T')[0],
-                    end_date: endDate.toISOString().split('T')[0]
-                },
-                success: function(response) {
-                    if (response.success) {
-                        self.pricingData = response.data.pricing_data || {};
-                        self.bookedDates = response.data.booked_dates || [];
-                        self.startDayNumber = response.data.start_day || self.startDayNumber;
-                        console.log('Calendar data loaded. Start day:', self.startDayNumber);
-                        self.renderCalendar();
-                    } else {
-                        self.showError(response.data || 'Failed to load calendar data');
-                    }
-                },
-                error: function() {
-                    self.showError('Failed to load calendar data');
-                }
-            });
-        }
-
-        renderCalendar() {
-            const calendarHTML = `
-                <div class="br-calendar-header">
-                    <h2>${br_calendar.strings.select_week}</h2>
-                    <p>Select your check-in date (${this.getDayName(this.startDayNumber)})</p>
-                </div>
-                <div class="br-month-navigation">
-                    <button class="br-nav-button prev-month">Previous Month</button>
-                    <span class="br-current-months"></span>
-                    <button class="br-nav-button next-month">Next Month</button>
-                </div>
-                <div class="br-calendar-container"></div>
-                <div class="br-selected-weeks" style="display:none;">
-                    <h3>Selected Weeks</h3>
-                    <div class="br-selected-weeks-list"></div>
-                    <div class="br-total-price"></div>
-                </div>
-                <div class="br-booking-form" style="display:none;">
-                    <h3>Guest Information</h3>
-                    <form class="br-booking-form-inner">
-                        <div class="br-form-row">
-                            <div class="br-form-group">
-                                <label for="br-first-name">First Name *</label>
-                                <input type="text" id="br-first-name" name="first_name" required>
-                            </div>
-                            <div class="br-form-group">
-                                <label for="br-last-name">Last Name *</label>
-                                <input type="text" id="br-last-name" name="last_name" required>
-                            </div>
-                        </div>
-                        <div class="br-form-row">
-                            <div class="br-form-group">
-                                <label for="br-email">Email *</label>
-                                <input type="email" id="br-email" name="email" required>
-                            </div>
-                            <div class="br-form-group">
-                                <label for="br-phone">Phone *</label>
-                                <input type="tel" id="br-phone" name="phone" required>
-                            </div>
-                        </div>
-                        <div class="br-form-group">
-                            <label for="br-message">Message (Optional)</label>
-                            <textarea id="br-message" name="message"></textarea>
-                        </div>
-                        <button type="submit" class="br-submit-button">Submit Booking Request</button>
-                    </form>
-                </div>
-            `;
-
-            $(this.container).html(calendarHTML);
-            this.updateMonthDisplay();
-        }
-
-        updateMonthDisplay() {
-            const today = new Date();
-            const startMonth = new Date(today.getFullYear(), today.getMonth() + this.currentOffset, 1);
-            const endMonth = new Date(today.getFullYear(), today.getMonth() + this.currentOffset + this.monthsToShow - 1, 1);
-
-            // Update navigation
-            const navText = startMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-            const endText = endMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-            
-            if (startMonth.getMonth() === endMonth.getMonth() && startMonth.getFullYear() === endMonth.getFullYear()) {
-                $(this.container).find('.br-current-months').text(navText);
-            } else if (startMonth.getFullYear() === endMonth.getFullYear()) {
-                $(this.container).find('.br-current-months').text(
-                    `${startMonth.toLocaleDateString('en-US', { month: 'long' })} - ${endText}`
-                );
-            } else {
-                $(this.container).find('.br-current-months').text(`${navText} - ${endText}`);
-            }
-
-            // Disable prev button if at start
-            $(this.container).find('.prev-month').prop('disabled', this.currentOffset <= 0);
-
-            this.renderMonths();
-        }
-
-        renderMonths() {
-            const calendarContainer = $(this.container).find('.br-calendar-container')[0];
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            
-            let monthsHTML = '<div class="br-months-wrapper">';
-
-            for (let i = 0; i < this.monthsToShow; i++) {
-                const monthOffset = this.currentOffset + i;
-                const monthDate = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
-                monthsHTML += this.renderMonth(monthDate, today);
-            }
-
-            monthsHTML += '</div>';
-            
-            // Add legend
-            monthsHTML += `
-                <div class="br-calendar-legend">
-                    <div class="br-legend-item">
-                        <div class="br-legend-color available"></div>
-                        <span>Available</span>
-                    </div>
-                    <div class="br-legend-item">
-                        <div class="br-legend-color selected"></div>
-                        <span>Selected</span>
-                    </div>
-                    <div class="br-legend-item">
-                        <div class="br-legend-color pending"></div>
-                        <span>Pending</span>
-                    </div>
-                    <div class="br-legend-item">
-                        <div class="br-legend-color booked"></div>
-                        <span>Booked</span>
-                    </div>
-                </div>
-            `;
-            
-            calendarContainer.innerHTML = monthsHTML;
-
-            // Add click handlers
-            this.attachDayClickHandlers();
-            
-            // Highlight selected weeks
-            this.selectedWeeks.forEach(week => {
-                const startDate = new Date(week.start);
-                const endDate = new Date(week.end);
-                
-                // Highlight all 7 days of the selected week
-                let currentDate = new Date(startDate);
-                while (currentDate <= endDate) {
-                    const dayElement = this.container.querySelector(`[data-date="${currentDate.toISOString().split('T')[0]}"]`);
-                    if (dayElement) {
-                        dayElement.classList.add('br-selected');
-                    }
-                    currentDate.setDate(currentDate.getDate() + 1);
-                }
-            });
-
-            // Add pending status styling
-            this.bookedDates.forEach(dateInfo => {
-                if (typeof dateInfo === 'object' && dateInfo.status === 'pending') {
-                    const dayElement = this.container.querySelector(`[data-date="${dateInfo.date}"]`);
-                    if (dayElement) {
-                        dayElement.classList.remove('br-booked');
-                        dayElement.classList.add('br-pending');
-                    }
+    };
+    
+    BookingCalendar.prototype.loadCalendar = function() {
+        var self = this;
+        var today = new Date();
+        var startDate = new Date(today);
+        startDate.setDate(startDate.getDate() + this.options.minAdvanceDays);
+        
+        var endDate = new Date(startDate);
+        endDate.setMonth(endDate.getMonth() + this.options.monthsToShow);
+        
+        // Show loading state
+        this.$element.find('.br-calendar-loading').show();
+        
+        // Get calendar data
+        $.ajax({
+            url: br_calendar.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'br_get_calendar_data',
+                nonce: br_calendar.nonce,
+                start_date: this.formatDate(startDate),
+                end_date: this.formatDate(endDate)
+            },
+            success: function(response) {
+                if (response.success) {
+                    self.pricingData = response.data.pricing_data;
+                    self.bookedDates = response.data.booked_dates;
+                    self.renderCalendar(startDate, endDate);
                 } else {
-                    // Legacy support for simple date strings
-                    const dayElement = this.container.querySelector(`[data-date="${dateInfo}"]`);
-                    if (dayElement) {
-                        dayElement.classList.add('br-booked');
-                    }
+                    self.showError(response.data || br_calendar.strings.error);
                 }
-            });
-        }
-
-        renderMonth(monthDate, today) {
-            const year = monthDate.getFullYear();
-            const month = monthDate.getMonth();
-            const firstDay = new Date(year, month, 1);
-            const lastDay = new Date(year, month + 1, 0);
-            const startingDayOfWeek = firstDay.getDay();
-            
-            let html = '<div class="br-month">';
-            html += `<div class="br-month-header">${monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</div>`;
-            html += '<div class="br-calendar-grid">';
-            
-            // Day headers
-            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-            dayNames.forEach(day => {
-                html += `<div class="br-day-name">${day}</div>`;
-            });
-            
-            // Empty cells for days before month starts
-            for (let i = 0; i < startingDayOfWeek; i++) {
-                const prevMonthDay = new Date(year, month, -startingDayOfWeek + i + 1);
-                html += this.renderDay(prevMonthDay, today, true);
+            },
+            error: function() {
+                self.showError(br_calendar.strings.error);
+            },
+            complete: function() {
+                self.$element.find('.br-calendar-loading').hide();
             }
-            
-            // Days of the month
-            for (let day = 1; day <= lastDay.getDate(); day++) {
-                const currentDate = new Date(year, month, day);
-                html += this.renderDay(currentDate, today, false);
+        });
+    };
+    
+    BookingCalendar.prototype.renderCalendar = function(startDate, endDate) {
+        var self = this;
+        var $container = this.$element.find('.br-calendar-container');
+        $container.empty();
+        
+        // Create navigation
+        var currentMonth = new Date(startDate.getFullYear(), startDate.getMonth() + this.currentMonthOffset, 1);
+        var nextMonth = new Date(currentMonth);
+        nextMonth.setMonth(nextMonth.getMonth() + 1);
+        
+        var monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                         'July', 'August', 'September', 'October', 'November', 'December'];
+        
+        var $nav = $('<div class="br-calendar-nav">' +
+            '<button class="br-nav-btn br-nav-prev" ' + (this.currentMonthOffset === 0 ? 'disabled' : '') + '>← Previous Month</button>' +
+            '<div class="br-calendar-months-display">' + 
+                monthNames[currentMonth.getMonth()] + ' - ' + monthNames[nextMonth.getMonth()] + ' ' + currentMonth.getFullYear() +
+            '</div>' +
+            '<button class="br-nav-btn br-nav-next" ' + (this.currentMonthOffset >= this.maxMonthOffset ? 'disabled' : '') + '>Next Month →</button>' +
+        '</div>');
+        
+        $container.append($nav);
+        
+        // Calendar grid
+        var $grid = $('<div class="br-calendar-grid"></div>');
+        
+        // Render two months
+        for (var i = 0; i < this.options.monthsPerView; i++) {
+            var monthToRender = new Date(startDate.getFullYear(), startDate.getMonth() + this.currentMonthOffset + i, 1);
+            if (monthToRender <= endDate) {
+                $grid.append(this.renderMonth(monthToRender));
             }
-            
-            // Fill remaining cells
-            const totalCells = startingDayOfWeek + lastDay.getDate();
-            const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
-            for (let i = 1; i <= remainingCells; i++) {
-                const nextMonthDay = new Date(year, month + 1, i);
-                html += this.renderDay(nextMonthDay, today, true);
+        }
+        
+        $container.append($grid);
+        
+        // Legend
+        var $legend = $('<div class="br-calendar-legend">' +
+            '<div class="br-legend-item"><div class="br-legend-color br-legend-available"></div>Available</div>' +
+            '<div class="br-legend-item"><div class="br-legend-color br-legend-selected"></div>Selected</div>' +
+            '<div class="br-legend-item"><div class="br-legend-color br-legend-booked"></div>Booked</div>' +
+        '</div>');
+        $container.append($legend);
+        
+        // Update selection display
+        this.updateCalendarDisplay();
+        
+        // Event handlers
+        $container.off('click').on('click', '.br-calendar-day.br-available', function() {
+            self.handleDateClick($(this));
+        });
+        
+        $container.on('click', '.br-nav-prev', function() {
+            if (self.currentMonthOffset > 0) {
+                self.currentMonthOffset -= self.options.monthsPerView;
+                self.renderCalendar(startDate, endDate);
             }
-            
-            html += '</div></div>';
-            return html;
-        }
-
-        renderDay(date, today, isOtherMonth) {
-            const dateStr = date.toISOString().split('T')[0];
-            const dayOfWeek = date.getDay();
-            const isPast = date < today;
-            const isStartDay = dayOfWeek === this.startDayNumber;
-            const pricingInfo = this.pricingData[dateStr];
-            
-            let classes = ['br-calendar-day'];
-            if (isOtherMonth) classes.push('br-other-month');
-            if (isPast) classes.push('br-past');
-            if (isStartDay && !isPast && pricingInfo && pricingInfo.available) {
-                classes.push('br-week-start', 'br-week-available');
+        });
+        
+        $container.on('click', '.br-nav-next', function() {
+            if (self.currentMonthOffset < self.maxMonthOffset) {
+                self.currentMonthOffset += self.options.monthsPerView;
+                self.renderCalendar(startDate, endDate);
             }
-            
-            let html = `<div class="${classes.join(' ')}" data-date="${dateStr}">`;
-            html += `<div class="br-day-number">${date.getDate()}</div>`;
-            
-            if (isStartDay && pricingInfo && !isPast && !isOtherMonth) {
-                const formattedPrice = br_calendar.currency_symbol + 
-                    new Intl.NumberFormat('en-US').format(pricingInfo.rate);
-                html += `<div class="br-day-price">${formattedPrice}</div>`;
-            }
-            
-            html += '</div>';
-            return html;
+        });
+    };
+    
+    BookingCalendar.prototype.renderMonth = function(date) {
+        var month = date.getMonth();
+        var year = date.getFullYear();
+        var firstDay = new Date(year, month, 1);
+        var lastDay = new Date(year, month + 1, 0);
+        
+        var $month = $('<div class="br-calendar-month"></div>');
+        
+        // Month header
+        var monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
+                         'July', 'August', 'September', 'October', 'November', 'December'];
+        $month.append('<div class="br-calendar-month-header">' + monthNames[month] + ' ' + year + '</div>');
+        
+        // Weekdays
+        var $weekdays = $('<div class="br-calendar-weekdays"></div>');
+        var weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        
+        // Start with the configured start day
+        for (var i = 0; i < 7; i++) {
+            var dayIndex = (this.options.startDay + i) % 7;
+            $weekdays.append('<div class="br-calendar-weekday">' + weekdayNames[dayIndex] + '</div>');
         }
-
-        getDayName(dayNumber) {
-            const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            return days[dayNumber];
+        $month.append($weekdays);
+        
+        // Days grid
+        var $days = $('<div class="br-calendar-days"></div>');
+        
+        // Empty cells before first day
+        var startingDayOfWeek = firstDay.getDay();
+        var daysToSkip = (startingDayOfWeek - this.options.startDay + 7) % 7;
+        for (var i = 0; i < daysToSkip; i++) {
+            $days.append('<div class="br-calendar-day br-other-month"></div>');
         }
-
-        attachDayClickHandlers() {
-            const self = this;
-            $(this.container).find('.br-week-start').on('click', function() {
-                const dateStr = $(this).data('date');
-                self.handleWeekSelection(dateStr);
-            });
-        }
-
-        handleWeekSelection(startDateStr) {
-            const startDate = new Date(startDateStr);
-            const endDate = new Date(startDate);
-            endDate.setDate(endDate.getDate() + 6); // 6 nights
+        
+        // Days of month
+        var today = new Date();
+        today.setHours(0, 0, 0, 0);
+        var minAdvanceDate = new Date(today);
+        minAdvanceDate.setDate(minAdvanceDate.getDate() + this.options.minAdvanceDays);
+        
+        for (var day = 1; day <= lastDay.getDate(); day++) {
+            var currentDate = new Date(year, month, day);
+            var dateStr = this.formatDate(currentDate);
+            var dayOfWeek = currentDate.getDay();
             
-            const weekKey = startDateStr;
-            const existingIndex = this.selectedWeeks.findIndex(w => w.start === weekKey);
+            var $day = $('<div class="br-calendar-day"></div>');
+            $day.attr('data-date', dateStr);
+            $day.append('<div class="br-day-number">' + day + '</div>');
             
-            if (existingIndex !== -1) {
-                // Remove week if already selected
-                this.selectedWeeks.splice(existingIndex, 1);
+            // Determine day status
+            if (currentDate < minAdvanceDate) {
+                $day.addClass('br-past');
+            } else if (this.bookedDates[dateStr] === 'booked') {
+                $day.addClass('br-booked');
             } else {
-                // Check if we've reached the maximum
-                if (this.selectedWeeks.length >= this.maxWeeks) {
-                    this.showError(`You can select a maximum of ${this.maxWeeks} weeks`);
-                    return;
-                }
+                $day.addClass('br-available');
                 
-                // Add week
-                const pricingInfo = this.pricingData[startDateStr];
-                if (pricingInfo && pricingInfo.available) {
-                    this.selectedWeeks.push({
-                        start: startDateStr,
-                        end: endDate.toISOString().split('T')[0],
-                        rate: pricingInfo.rate
-                    });
+                // Add price for start days (Saturday)
+                if (dayOfWeek === this.options.startDay % 7 && this.pricingData[dateStr]) {
+                    var price = this.pricingData[dateStr].rate;
+                    if (price) {
+                        $day.append('<div class="br-week-price">' + this.options.currencySymbol + Math.round(price) + '</div>');
+                    }
                     
-                    // Sort by date
-                    this.selectedWeeks.sort((a, b) => new Date(a.start) - new Date(b.start));
-                } else {
-                    this.showError(br_calendar.strings.week_unavailable);
-                    return;
+                    if (!this.pricingData[dateStr].available) {
+                        $day.removeClass('br-available').addClass('br-booked');
+                    }
                 }
             }
             
-            this.renderMonths();
-            this.updateSelectedWeeksSummary();
+            $days.append($day);
         }
-
-        updateSelectedWeeksSummary() {
-            const container = $(this.container).find('.br-selected-weeks');
-            const list = container.find('.br-selected-weeks-list');
-            
-            if (this.selectedWeeks.length === 0) {
-                container.hide();
-                $(this.container).find('.br-booking-form').hide();
+        
+        // Complete the grid
+        var totalCells = $days.children().length;
+        var cellsToAdd = (7 - (totalCells % 7)) % 7;
+        for (var i = 0; i < cellsToAdd; i++) {
+            $days.append('<div class="br-calendar-day br-other-month"></div>');
+        }
+        
+        $month.append($days);
+        
+        return $month;
+    };
+    
+    BookingCalendar.prototype.handleDateClick = function($day) {
+        var clickedDate = new Date($day.attr('data-date'));
+        
+        // First click - set start date
+        if (!this.selectedStartDate || (this.selectedStartDate && this.selectedEndDate)) {
+            this.selectedStartDate = clickedDate;
+            this.selectedEndDate = null;
+            this.updateCalendarDisplay();
+            this.clearFormDisplay();
+        }
+        // Second click - set end date
+        else if (this.selectedStartDate && !this.selectedEndDate) {
+            // Ensure end date is after start date
+            if (clickedDate <= this.selectedStartDate) {
+                // Reset selection
+                this.selectedStartDate = clickedDate;
+                this.selectedEndDate = null;
+                this.updateCalendarDisplay();
+                this.clearFormDisplay();
                 return;
             }
             
-            container.show();
-            $(this.container).find('.br-booking-form').show();
+            // Check minimum nights
+            var nights = Math.floor((clickedDate - this.selectedStartDate) / (1000 * 60 * 60 * 24));
+            if (nights < this.options.minNights) {
+                this.showError(br_calendar.strings.min_nights_error || 'Minimum stay is ' + this.options.minNights + ' nights');
+                return;
+            }
             
-            let html = '';
-            let totalPrice = 0;
+            // Check availability of all dates in range
+            var tempDate = new Date(this.selectedStartDate);
+            var allAvailable = true;
             
-            this.selectedWeeks.forEach((week, index) => {
-                const startDate = new Date(week.start);
-                const endDate = new Date(week.end);
-                const formattedStart = startDate.toLocaleDateString('en-US', { 
-                    weekday: 'short', 
-                    month: 'short', 
-                    day: 'numeric',
-                    year: 'numeric'
-                });
-                const formattedEnd = endDate.toLocaleDateString('en-US', { 
-                    weekday: 'short', 
-                    month: 'short', 
-                    day: 'numeric',
-                    year: 'numeric'
-                });
-                const formattedPrice = br_calendar.currency_symbol + 
-                    new Intl.NumberFormat('en-US').format(week.rate);
-                
-                html += `
-                    <div class="br-week-item">
-                        <span class="br-week-dates">${formattedStart} - ${formattedEnd}</span>
-                        <span class="br-week-price">${formattedPrice}</span>
-                        <button class="br-remove-week" data-index="${index}">×</button>
-                    </div>
-                `;
-                
-                totalPrice += week.rate;
-            });
-            
-            list.html(html);
-            
-            const formattedTotal = br_calendar.currency_symbol + 
-                new Intl.NumberFormat('en-US').format(totalPrice);
-            container.find('.br-total-price').html(`Total: ${formattedTotal}`);
-            
-            // Bind remove handlers
-            const self = this;
-            container.find('.br-remove-week').on('click', function() {
-                const index = $(this).data('index');
-                self.selectedWeeks.splice(index, 1);
-                self.renderMonths();
-                self.updateSelectedWeeksSummary();
-            });
-        }
-
-        bindEvents() {
-            const self = this;
-            
-            // Navigation
-            $(this.container).on('click', '.prev-month', function() {
-                if (self.currentOffset > 0) {
-                    self.currentOffset -= self.monthsToShow;
-                    self.updateMonthDisplay();
+            while (tempDate <= clickedDate) {
+                var dateStr = this.formatDate(tempDate);
+                if (this.bookedDates[dateStr] === 'booked' || 
+                    this.$element.find('.br-calendar-day[data-date="' + dateStr + '"]').hasClass('br-booked')) {
+                    allAvailable = false;
+                    break;
                 }
-            });
+                tempDate.setDate(tempDate.getDate() + 1);
+            }
             
-            $(this.container).on('click', '.next-month', function() {
-                self.currentOffset += self.monthsToShow;
-                self.updateMonthDisplay();
-            });
+            if (!allAvailable) {
+                this.showError(br_calendar.strings.dates_unavailable || 'Some dates in this range are not available');
+                this.selectedStartDate = null;
+                this.selectedEndDate = null;
+                this.updateCalendarDisplay();
+                return;
+            }
             
-            // Form submission
-            $(this.container).on('submit', '.br-booking-form-inner', function(e) {
-                e.preventDefault();
-                self.submitBooking();
-            });
+            // Set end date
+            this.selectedEndDate = clickedDate;
+            this.updateCalendarDisplay();
+            this.updateFormDates();
+            this.calculatePrice();
         }
-
-        submitBooking() {
-            const self = this;
-            const form = $(this.container).find('.br-booking-form-inner');
-            const submitButton = form.find('.br-submit-button');
+    };
+    
+    BookingCalendar.prototype.updateCalendarDisplay = function() {
+        var self = this;
+        
+        // Clear all selection classes
+        this.$element.find('.br-calendar-day').removeClass('br-selected br-in-range');
+        
+        if (this.selectedStartDate) {
+            // Highlight start date
+            var startDateStr = this.formatDate(this.selectedStartDate);
+            this.$element.find('.br-calendar-day[data-date="' + startDateStr + '"]').addClass('br-selected');
             
-            // Disable submit button
-            submitButton.prop('disabled', true).text('Processing...');
-            
-            // Get first and last dates from selected weeks
-            const firstWeek = this.selectedWeeks[0];
-            const lastWeek = this.selectedWeeks[this.selectedWeeks.length - 1];
-            
-            // Prepare data
-            const formData = {
-                action: 'br_submit_calendar_booking',
-                nonce: br_calendar.nonce,
-                first_name: form.find('#br-first-name').val(),
-                last_name: form.find('#br-last-name').val(),
-                email: form.find('#br-email').val(),
-                phone: form.find('#br-phone').val(),
-                message: form.find('#br-message').val(),
-                checkin_date: firstWeek.start,
-                checkout_date: lastWeek.end,
-                weeks_data: JSON.stringify(this.selectedWeeks),
-                total_price: this.selectedWeeks.reduce((sum, week) => sum + week.rate, 0)
-            };
-            
-            $.ajax({
-                url: br_calendar.ajax_url,
-                type: 'POST',
-                data: formData,
-                success: function(response) {
-                    if (response.success) {
-                        self.showSuccess(response.data.message || br_calendar.strings.booking_submitted);
-                        // Reset form and selection
-                        form[0].reset();
-                        self.selectedWeeks = [];
-                        self.renderMonths();
-                        self.updateSelectedWeeksSummary();
-                        // Reload calendar data to show new booking
-                        setTimeout(() => self.loadCalendarData(), 2000);
-                    } else {
-                        self.showError(response.data || br_calendar.strings.error);
+            if (this.selectedEndDate) {
+                // Highlight end date
+                var endDateStr = this.formatDate(this.selectedEndDate);
+                this.$element.find('.br-calendar-day[data-date="' + endDateStr + '"]').addClass('br-selected');
+                
+                // Highlight range
+                this.$element.find('.br-calendar-day').each(function() {
+                    var $day = $(this);
+                    var dateStr = $day.attr('data-date');
+                    if (dateStr) {
+                        var date = new Date(dateStr);
+                        if (date > self.selectedStartDate && date < self.selectedEndDate) {
+                            $day.addClass('br-in-range');
+                        }
                     }
-                },
-                error: function() {
-                    self.showError(br_calendar.strings.error);
-                },
-                complete: function() {
-                    submitButton.prop('disabled', false).text('Submit Booking Request');
-                }
-            });
-        }
-
-        showError(message) {
-            this.showMessage(message, 'error');
-        }
-
-        showSuccess(message) {
-            this.showMessage(message, 'success');
-        }
-
-        showMessage(message, type) {
-            // Remove any existing messages
-            $(this.container).find('.br-message').remove();
-            
-            const messageHtml = `<div class="br-message ${type}">${message}</div>`;
-            $(this.container).prepend(messageHtml);
-            
-            // Scroll to message
-            $('html, body').animate({
-                scrollTop: $(this.container).offset().top - 100
-            }, 300);
-            
-            // Auto-hide after 5 seconds
-            setTimeout(() => {
-                $(this.container).find('.br-message').fadeOut(() => {
-                    $(this.container).find('.br-message').remove();
                 });
-            }, 5000);
+            }
         }
-    }
-
-    // Initialize all calendar widgets on page
+    };
+    
+    BookingCalendar.prototype.clearFormDisplay = function() {
+        $('.br-selected-dates').removeClass('show');
+        $('.br-price-display').removeClass('show');
+        $('.br-submit-btn').prop('disabled', true);
+    };
+    
+    BookingCalendar.prototype.initForm = function() {
+        if (!this.options.showForm) return;
+        
+        var self = this;
+        var $formContainer = this.$element.find('.br-calendar-form-container');
+        
+        var services = [
+            { key: 'taxi_service', label: 'Taxi service from and to the airport' },
+            { key: 'greeting_service', label: 'Greeting service – to welcome you to the Villa and overview the region' },
+            { key: 'welcome_hamper', label: 'Welcome hamper on arrival' },
+            { key: 'sailing', label: 'Sailing' },
+            { key: 'motorboat_hire', label: 'Motorboat hire' },
+            { key: 'flight_bookings', label: 'Flight bookings (from the UK)' },
+            { key: 'car_hire', label: 'Car hire booking service' }
+        ];
+        
+        var servicesHtml = services.map(function(service) {
+            return '<div class="br-service-item">' +
+                '<input type="checkbox" id="service_' + service.key + '" name="additional_services[]" value="' + service.key + '" class="br-service-checkbox">' +
+                '<label for="service_' + service.key + '" class="br-service-label">' + service.label + '</label>' +
+                '</div>';
+        }).join('');
+        
+        var formHtml = 
+            '<div class="br-booking-form">' +
+                '<h3 class="br-form-title">Booking Request Form</h3>' +
+                '<p class="br-form-subtitle">Please select your dates above and fill in the form below</p>' +
+                
+                '<div class="br-selected-dates">' +
+                    '<div class="br-dates-title">Selected Dates</div>' +
+                    '<div class="br-dates-info"></div>' +
+                '</div>' +
+                
+                '<div class="br-price-display">' +
+                    '<div class="br-price-label">Total Price</div>' +
+                    '<div class="br-price-amount"></div>' +
+                '</div>' +
+                
+                '<form class="br-form" method="post">' +
+                    '<input type="hidden" name="checkin_date" id="br-checkin-date">' +
+                    '<input type="hidden" name="checkout_date" id="br-checkout-date">' +
+                    '<input type="hidden" name="total_price" id="br-total-price">' +
+                    
+                    '<div class="br-form-group">' +
+                        '<label for="br-guest-name" class="br-form-label">Full Name <span class="required">*</span></label>' +
+                        '<input type="text" name="guest_name" id="br-guest-name" class="br-form-control" required>' +
+                    '</div>' +
+                    
+                    '<div class="br-form-group">' +
+                        '<label for="br-email" class="br-form-label">Email Address <span class="required">*</span></label>' +
+                        '<input type="email" name="email" id="br-email" class="br-form-control" required>' +
+                    '</div>' +
+                    
+                    '<div class="br-form-group">' +
+                        '<label for="br-phone" class="br-form-label">Phone Number <span class="required">*</span></label>' +
+                        '<input type="tel" name="phone" id="br-phone" class="br-form-control" required>' +
+                    '</div>' +
+                    
+                    '<div class="br-form-group">' +
+                        '<label class="br-form-label">Additional Services</label>' +
+                        '<div class="br-services-group">' + servicesHtml + '</div>' +
+                    '</div>' +
+                    
+                    '<div class="br-form-group">' +
+                        '<label for="br-message" class="br-form-label">Special Requests or Comments</label>' +
+                        '<textarea name="message" id="br-message" class="br-form-control" rows="4" placeholder="Please let us know if you have any special requirements or questions..."></textarea>' +
+                    '</div>' +
+                    
+                    '<button type="submit" class="br-submit-btn" disabled>Submit Booking Request</button>' +
+                '</form>' +
+            '</div>';
+        
+        $formContainer.html(formHtml);
+        
+        // Form submission
+        $formContainer.on('submit', '.br-form', function(e) {
+            e.preventDefault();
+            self.submitBooking();
+        });
+    };
+    
+    BookingCalendar.prototype.updateFormDates = function() {
+        if (!this.selectedStartDate || !this.selectedEndDate) return;
+        
+        var checkinStr = this.formatDate(this.selectedStartDate);
+        var checkoutStr = this.formatDate(this.selectedEndDate);
+        
+        $('#br-checkin-date').val(checkinStr);
+        $('#br-checkout-date').val(checkoutStr);
+        
+        // Calculate nights
+        var nights = Math.floor((this.selectedEndDate - this.selectedStartDate) / (1000 * 60 * 60 * 24));
+        
+        // Format dates nicely
+        var options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+        var checkinFormatted = this.selectedStartDate.toLocaleDateString('en-US', options);
+        var checkoutFormatted = this.selectedEndDate.toLocaleDateString('en-US', options);
+        
+        $('.br-selected-dates').addClass('show');
+        $('.br-dates-info').text(checkinFormatted + ' - ' + checkoutFormatted + ' (' + nights + ' nights)');
+        
+        $('.br-submit-btn').prop('disabled', false);
+    };
+    
+    BookingCalendar.prototype.calculatePrice = function() {
+        if (!this.selectedStartDate || !this.selectedEndDate) return;
+        
+        var self = this;
+        
+        $.ajax({
+            url: br_calendar.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'br_calculate_price',
+                nonce: br_calendar.nonce,
+                checkin: this.formatDate(this.selectedStartDate),
+                checkout: this.formatDate(this.selectedEndDate)
+            },
+            success: function(response) {
+                if (response.success) {
+                    $('#br-total-price').val(response.data.total_price);
+                    $('.br-price-display').addClass('show');
+                    $('.br-price-amount').text(response.data.formatted_total);
+                }
+            }
+        });
+    };
+    
+    BookingCalendar.prototype.submitBooking = function() {
+        var self = this;
+        var $form = this.$element.find('.br-form');
+        var $submitBtn = $form.find('.br-submit-btn');
+        
+        if (!$form[0].checkValidity()) {
+            $form[0].reportValidity();
+            return;
+        }
+        
+        // Show loading
+        $submitBtn.prop('disabled', true).html('Processing...<span class="br-spinner"></span>');
+        
+        var formData = {
+            action: 'br_submit_calendar_booking',
+            nonce: br_calendar.nonce,
+            guest_name: $('#br-guest-name').val(),
+            email: $('#br-email').val(),
+            phone: $('#br-phone').val(),
+            checkin_date: $('#br-checkin-date').val(),
+            checkout_date: $('#br-checkout-date').val(),
+            total_price: $('#br-total-price').val(),
+            message: $('#br-message').val(),
+            additional_services: []
+        };
+        
+        // Get selected services
+        $('input[name="additional_services[]"]:checked').each(function() {
+            formData.additional_services.push($(this).val());
+        });
+        
+        $.ajax({
+            url: br_calendar.ajax_url,
+            type: 'POST',
+            data: formData,
+            success: function(response) {
+                if (response.success) {
+                    self.showSuccess(response.data.message || 'Your booking request has been submitted successfully!');
+                    $form[0].reset();
+                    self.selectedStartDate = null;
+                    self.selectedEndDate = null;
+                    self.updateCalendarDisplay();
+                    self.clearFormDisplay();
+                    
+                    // Reload calendar
+                    setTimeout(function() {
+                        self.loadCalendar();
+                    }, 2000);
+                } else {
+                    self.showError(response.data || 'An error occurred. Please try again.');
+                }
+            },
+            error: function() {
+                self.showError('An error occurred. Please try again.');
+            },
+            complete: function() {
+                $submitBtn.prop('disabled', false).text('Submit Booking Request');
+            }
+        });
+    };
+    
+    BookingCalendar.prototype.formatDate = function(date) {
+        var year = date.getFullYear();
+        var month = ('0' + (date.getMonth() + 1)).slice(-2);
+        var day = ('0' + date.getDate()).slice(-2);
+        return year + '-' + month + '-' + day;
+    };
+    
+    BookingCalendar.prototype.showError = function(message) {
+        this.showMessage(message, 'error');
+    };
+    
+    BookingCalendar.prototype.showSuccess = function(message) {
+        this.showMessage(message, 'success');
+    };
+    
+    BookingCalendar.prototype.showMessage = function(message, type) {
+        // Remove existing messages
+        this.$element.find('.br-message').remove();
+        
+        var $message = $('<div class="br-message br-message-' + type + '">' + message + '</div>');
+        
+        if (this.options.showForm) {
+            this.$element.find('.br-booking-form').prepend($message);
+        } else {
+            this.$element.find('.br-calendar-container').prepend($message);
+        }
+        
+        // Scroll to message
+        $('html, body').animate({
+            scrollTop: $message.offset().top - 100
+        }, 500);
+        
+        // Auto remove
+        setTimeout(function() {
+            $message.fadeOut(function() {
+                $(this).remove();
+            });
+        }, 5000);
+    };
+    
+    // jQuery plugin
+    $.fn.bookingCalendar = function(options) {
+        return this.each(function() {
+            var $this = $(this);
+            var data = $this.data('booking-calendar');
+            
+            if (!data) {
+                var opts = $.extend({}, $this.data(), options);
+                $this.data('booking-calendar', new BookingCalendar(this, opts));
+            }
+        });
+    };
+    
+    // Auto-initialize
     $(document).ready(function() {
         $('.br-calendar-widget').each(function() {
-            new BookingCalendarV3(this);
+            $(this).bookingCalendar();
         });
     });
-
+    
 })(jQuery);

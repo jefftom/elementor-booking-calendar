@@ -1,266 +1,520 @@
-/* Booking Requests Public Styles */
+/* Booking Calendar v3 Styles - Maintaining Original Design */
 
-/* Pricing Calculator Styles */
-.br-pricing-calculator {
-    background: #f8f9fa;
-    border: 2px solid #e9ecef;
-    border-radius: 8px;
-    padding: 25px;
-    margin: 30px 0;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    transition: all 0.3s ease;
+.br-calendar-widget {
+    max-width: 1200px;
+    margin: 0 auto;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-.br-pricing-calculator:hover {
-    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+/* Main Calendar Container */
+.br-calendar-container {
+    background: #ffffff;
+    padding: 20px;
+    margin-bottom: 30px;
 }
 
-.br-pricing-header {
-    border-bottom: 2px solid #dee2e6;
-    padding-bottom: 15px;
-    margin-bottom: 20px;
+.br-calendar-loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: #666;
+    font-size: 16px;
 }
 
-.br-pricing-header h4 {
-    margin: 0;
-    color: #212529;
-    font-size: 20px;
-    font-weight: 600;
-}
-
-.br-pricing-content {
-    position: relative;
-    transition: all 0.3s ease;
-}
-
-.br-pricing-content.br-pricing-updated {
-    transform: scale(1.02);
-}
-
-.br-pricing-row {
+/* Calendar Header with Navigation */
+.br-calendar-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 0;
-    border-bottom: 1px solid #e9ecef;
+    margin-bottom: 30px;
+    padding: 0 10px;
 }
 
-.br-pricing-row:last-child {
-    border-bottom: none;
+.br-calendar-nav {
+    display: flex;
+    gap: 10px;
 }
 
-.br-pricing-divider {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 2px solid #dee2e6;
-}
-
-.br-pricing-label {
-    font-weight: 600;
-    color: #6c757d;
+.br-nav-btn {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
     font-size: 14px;
 }
 
-.br-pricing-value {
-    font-weight: 500;
+.br-nav-btn:hover:not(:disabled) {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.br-nav-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.br-calendar-title {
+    font-size: 20px;
+    font-weight: 600;
     color: #212529;
-    font-size: 16px;
 }
 
-.br-pricing-total {
-    background: #e7f3ff;
-    margin: 15px -25px -25px;
-    padding: 20px 25px;
-    border-radius: 0 0 6px 6px;
+/* Calendar Grid - 2 months side by side */
+.br-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 40px;
+    margin-bottom: 20px;
 }
 
-.br-pricing-total .br-pricing-label {
-    font-size: 16px;
-    color: #495057;
+@media (max-width: 768px) {
+    .br-calendar-grid {
+        grid-template-columns: 1fr;
+        gap: 30px;
+    }
 }
 
-.br-pricing-total .br-pricing-value {
-    font-size: 24px;
-    font-weight: 700;
-    color: #0066cc;
+/* Individual Month */
+.br-calendar-month {
+    background: #ffffff;
 }
 
-.br-pricing-footer {
-    margin-top: 15px;
-    padding-top: 15px;
-    border-top: 1px solid #e9ecef;
+.br-calendar-month-header {
     text-align: center;
+    padding: 15px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: #212529;
+    border-bottom: 2px solid #e9ecef;
+    margin-bottom: 15px;
 }
 
-.br-pricing-note {
-    margin: 0;
+/* Weekdays Row */
+.br-calendar-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    margin-bottom: 10px;
+}
+
+.br-calendar-weekday {
+    text-align: center;
+    padding: 10px 0;
+    font-weight: 600;
     font-size: 13px;
     color: #6c757d;
-    font-style: italic;
+    text-transform: uppercase;
 }
 
-/* Loading State */
-.br-loading {
-    display: inline-block;
-    color: #6c757d;
-    font-size: 14px;
-    font-style: italic;
+/* Days Grid */
+.br-calendar-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
 }
 
-.br-loading:after {
-    content: '...';
-    animation: br-dots 1.5s steps(4, end) infinite;
-}
-
-@keyframes br-dots {
-    0%, 20% {
-        color: rgba(0,0,0,0);
-        text-shadow: .25em 0 0 rgba(0,0,0,0), .5em 0 0 rgba(0,0,0,0);
-    }
-    40% {
-        color: #6c757d;
-        text-shadow: .25em 0 0 rgba(0,0,0,0), .5em 0 0 rgba(0,0,0,0);
-    }
-    60% {
-        text-shadow: .25em 0 0 #6c757d, .5em 0 0 rgba(0,0,0,0);
-    }
-    80%, 100% {
-        text-shadow: .25em 0 0 #6c757d, .5em 0 0 #6c757d;
-    }
-}
-
-/* Error State */
-.br-pricing-error {
-    background: #f8d7da;
-    color: #721c24;
-    padding: 15px;
+/* Individual Day Cell */
+.br-calendar-day {
+    aspect-ratio: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+    border: 2px solid transparent;
     border-radius: 4px;
-    text-align: center;
+}
+
+/* Day Number */
+.br-day-number {
+    font-size: 15px;
     font-weight: 500;
+    color: #212529;
+    line-height: 1;
 }
 
-/* Availability Warning */
-.br-availability-warning {
-    background: #fff3cd;
-    border: 1px solid #ffeaa7;
-    color: #856404;
-    padding: 15px 20px;
-    margin: 15px 0;
-    border-radius: 4px;
+/* Day States */
+.br-calendar-day.br-available {
+    background: #f8f9fa;
+}
+
+.br-calendar-day.br-available:hover {
+    background: #ffd700;
+    transform: scale(1.05);
+}
+
+.br-calendar-day.br-booked {
+    background: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.br-calendar-day.br-booked .br-day-number {
+    color: #ffffff;
+}
+
+.br-calendar-day.br-selected {
+    background: #004085 !important;
+    border-color: #004085;
+}
+
+.br-calendar-day.br-selected .br-day-number {
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+.br-calendar-day.br-in-range {
+    background: #cce5ff;
+}
+
+.br-calendar-day.br-in-range .br-day-number {
+    color: #004085;
+}
+
+.br-calendar-day.br-past {
+    background: #ffffff;
+    cursor: not-allowed;
+    opacity: 0.4;
+}
+
+.br-calendar-day.br-other-month {
+    visibility: hidden;
+}
+
+/* Week Start Indicator - Price Display */
+.br-week-price {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: #28a745;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.br-calendar-day.br-booked .br-week-price {
     display: none;
 }
 
-.br-availability-warning p {
-    margin: 0;
-    font-weight: 500;
+/* Legend */
+.br-calendar-legend {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    margin-top: 20px;
 }
 
-/* Validation Error */
-.br-validation-error {
-    color: #dc3545;
+.br-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 14px;
-    margin-top: 5px;
-    font-weight: 500;
+    color: #495057;
 }
 
-/* Form Integration Styles */
-.gform_wrapper .br-pricing-calculator {
-    clear: both;
+.br-legend-color {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    border: 2px solid #dee2e6;
+}
+
+.br-legend-available {
+    background: #f8f9fa;
+}
+
+.br-legend-selected {
+    background: #004085;
+}
+
+.br-legend-booked {
+    background: #6c757d;
+}
+
+/* Booking Form Container */
+.br-calendar-form-container {
+    background: #ffffff;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    padding: 40px;
     margin-top: 30px;
 }
 
-/* Elementor Widget Styles */
-.br-booking-form-wrapper {
-    width: 100%;
+/* Form Title */
+.br-form-title {
+    font-size: 28px;
+    font-weight: 600;
+    color: #212529;
+    text-align: center;
+    margin-bottom: 30px;
 }
 
-.br-booking-form {
+/* Selected Dates Display */
+.br-selected-dates {
+    background: #e7f3ff;
+    border: 1px solid #b8daff;
+    border-radius: 6px;
+    padding: 20px;
+    margin-bottom: 25px;
+    display: none;
+}
+
+.br-selected-dates.show {
+    display: block;
+}
+
+.br-dates-title {
+    font-weight: 600;
+    color: #004085;
+    margin-bottom: 8px;
+    font-size: 16px;
+}
+
+.br-dates-info {
+    color: #004085;
+    font-size: 18px;
+}
+
+/* Price Display */
+.br-price-display {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 6px;
+    padding: 25px;
+    margin-bottom: 30px;
+    text-align: center;
+    display: none;
+}
+
+.br-price-display.show {
+    display: block;
+}
+
+.br-price-label {
+    font-size: 16px;
+    color: #155724;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.br-price-amount {
+    font-size: 36px;
+    font-weight: 700;
+    color: #155724;
+}
+
+/* Form Groups */
+.br-form-group {
+    margin-bottom: 25px;
+}
+
+.br-form-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #212529;
+    font-size: 15px;
+}
+
+.br-form-label .required {
+    color: #dc3545;
+}
+
+.br-form-control {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
+    font-size: 16px;
+    transition: all 0.2s ease;
     background: #ffffff;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+
+.br-form-control:focus {
+    outline: none;
+    border-color: #004085;
+    box-shadow: 0 0 0 0.2rem rgba(0, 64, 133, 0.1);
+}
+
+.br-form-control:disabled {
+    background-color: #f8f9fa;
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* Services Group */
+.br-services-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 10px 0;
+}
+
+.br-service-item {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.br-service-item:hover {
+    background: #f8f9fa;
+}
+
+.br-service-checkbox {
+    width: 20px;
+    height: 20px;
+    margin-right: 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.br-service-label {
+    cursor: pointer;
+    font-size: 15px;
+    color: #495057;
+    line-height: 1.4;
+}
+
+/* Textarea */
+textarea.br-form-control {
+    resize: vertical;
+    min-height: 100px;
+}
+
+/* Submit Button */
+.br-submit-btn {
+    width: 100%;
+    padding: 16px 32px;
+    background: #004085;
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.br-submit-btn:hover:not(:disabled) {
+    background: #002752;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 64, 133, 0.3);
+}
+
+.br-submit-btn:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+/* Messages */
+.br-message {
+    padding: 16px 20px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    font-size: 15px;
+    animation: slideInDown 0.3s ease;
+}
+
+@keyframes slideInDown {
+    from {
+        transform: translateY(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.br-message-success {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+.br-message-error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+
+.br-message-info {
+    background: #d1ecf1;
+    border: 1px solid #bee5eb;
+    color: #0c5460;
+}
+
+/* Loading Spinner */
+.br-spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 3px solid #ffffff;
+    border-top: 3px solid transparent;
+    border-radius: 50%;
+    animation: br-spin 1s linear infinite;
+    margin-left: 10px;
+    vertical-align: middle;
+}
+
+@keyframes br-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .br-pricing-calculator {
-        padding: 20px;
-        margin: 20px 0;
+    .br-calendar-form-container {
+        padding: 25px;
     }
     
-    .br-pricing-total {
-        margin: 15px -20px -20px;
-        padding: 15px 20px;
+    .br-form-title {
+        font-size: 24px;
     }
     
-    .br-pricing-total .br-pricing-value {
-        font-size: 20px;
+    .br-calendar-day {
+        font-size: 14px;
     }
     
-    .br-booking-form {
-        padding: 20px;
-    }
-}
-
-@media (max-width: 480px) {
-    .br-pricing-row {
-        flex-direction: column;
-        align-items: flex-start;
-        padding: 10px 0;
+    .br-week-price {
+        font-size: 9px;
     }
     
-    .br-pricing-label {
-        margin-bottom: 5px;
+    .br-calendar-legend {
+        flex-wrap: wrap;
+        gap: 15px;
     }
     
-    .br-pricing-value {
-        font-size: 18px;
+    .br-submit-btn {
+        font-size: 16px;
+        padding: 14px 24px;
     }
-}
-
-/* Date Picker Enhancements */
-input[type="date"].br-date-field {
-    padding: 10px;
-    border: 1px solid #ced4da;
-    border-radius: 4px;
-    font-size: 16px;
-    transition: border-color 0.15s ease-in-out;
-}
-
-input[type="date"].br-date-field:focus {
-    border-color: #80bdff;
-    outline: 0;
-    box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
-}
-
-/* Calendar Icon */
-.br-date-icon {
-    position: relative;
-}
-
-.br-date-icon:after {
-    content: '\1F4C5';
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    pointer-events: none;
-    opacity: 0.5;
 }
 
 /* Print Styles */
 @media print {
-    .br-pricing-calculator {
-        border: 1px solid #000;
-        box-shadow: none;
-    }
-    
-    .br-pricing-total {
-        background: #f0f0f0;
-    }
-    
-    .br-availability-warning,
-    .br-validation-error {
+    .br-calendar-form-container,
+    .br-calendar-nav,
+    .br-calendar-legend {
         display: none !important;
+    }
+    
+    .br-calendar-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .br-calendar-day {
+        border: 1px solid #dee2e6;
     }
 }

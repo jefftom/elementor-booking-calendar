@@ -20,92 +20,14 @@ class BR_Form_Handler {
     }
     
     /**
-     * Test form handler for debugging
-     */
-    public function test_form_handler() {
-        // Log all received data
-        error_log('BR Form Handler Test - POST data: ' . print_r($_POST, true));
-        error_log('BR Form Handler Test - Nonce: ' . ($_POST['nonce'] ?? 'not set'));
-        
-        $response = array(
-            'received_data' => $_POST,
-            'nonce_valid' => wp_verify_nonce($_POST['nonce'] ?? '', 'br_calendar_nonce'),
-            'required_fields' => array(
-                'guest_name' => !empty($_POST['guest_name']),
-                'email' => !empty($_POST['email']),
-                'phone' => !empty($_POST['phone']),
-                'checkin_date' => !empty($_POST['checkin_date']),
-                'checkout_date' => !empty($_POST['checkout_date'])
-            ),
-            'email_valid' => is_email($_POST['email'] ?? ''),
-            'database_table_exists' => $this->check_database_table()
-        );
-        
-        wp_send_json_success($response);
-    }
-    
-    /**
-     * Check if database table exists
-     */
-    private function check_database_table() {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'br_bookings';
-        return $wpdb->get_var("SHOW TABLES LIKE '$table_name'") == $table_name;
-    }
-    
-    /**
-     * Handle booking submission from Gravity Forms
-     */
-    public function handle_booking_submission() {
-        // This is triggered by the Gravity Forms addon
-        // Implementation depends on your Gravity Forms setup
-        
-        // Verify nonce if using custom AJAX
-        if (!wp_verify_nonce($_POST['nonce'], 'br_booking_nonce')) {
-            wp_send_json_error('Invalid nonce');
-        }
-        
-        // Process the booking from Gravity Forms data
-        $this->process_gravity_forms_booking($_POST);
-    }
-    
-    /**
-     * Handle Gravity Forms submission
-     */
-    public function handle_gravity_form_submission($entry, $form) {
-        // Check if this is a booking form based on form ID or form class
-        // You can set this in the Gravity Forms addon settings
-        $booking_form_ids = get_option('br_gravity_forms_ids', array());
-        
-        if (!in_array($form['id'], $booking_form_ids)) {
-            return;
-        }
-        
-        // Map Gravity Forms fields to booking data
-        $booking_data = $this->map_gravity_forms_data($entry, $form);
-        
-        // Save booking
-        $booking_id = $this->save_booking($booking_data);
-        
-        if ($booking_id) {
-            // Send notifications
-            do_action('br_send_admin_notification', $booking_id);
-            do_action('br_send_guest_confirmation', $booking_id);
-        }
-    }
-    
-    /**
      * Handle booking submission from calendar widget
      */
     public function handle_calendar_booking() {
+        // Set timezone to UTC+3
+        date_default_timezone_set(BR_TIMEZONE);
+        
         // Debug - log what we're receiving
         error_log('BR Form Handler - Received POST data: ' . print_r($_POST, true));
-        error_log('BR Form Handler - Looking for name fields:');
-        error_log('  first_name: ' . ($_POST['first_name'] ?? 'not set'));
-        error_log('  last_name: ' . ($_POST['last_name'] ?? 'not set'));
-        error_log('  firstname: ' . ($_POST['firstname'] ?? 'not set'));
-        error_log('  lastname: ' . ($_POST['lastname'] ?? 'not set'));
-        error_log('  guest_name: ' . ($_POST['guest_name'] ?? 'not set'));
         
         // Verify nonce
         if (!wp_verify_nonce($_POST['nonce'], 'br_calendar_nonce')) {
@@ -119,53 +41,11 @@ class BR_Form_Handler {
             wp_send_json_error('Database error: Table not found. Please contact administrator.');
         }
         
-        // Log which fields are present
-        $field_status = array();
-        $expected_fields = array('guest_name', 'email', 'phone', 'checkin_date', 'checkout_date');
-        foreach ($expected_fields as $field) {
-            $field_status[$field] = isset($_POST[$field]) ? 'present' : 'missing';
-            if (isset($_POST[$field])) {
-                $field_status[$field] .= ' (value: ' . $_POST[$field] . ')';
-            }
-        }
-        error_log('BR Form Handler - Field status: ' . print_r($field_status, true));
-        
-        // Check for alternative field names
-        $field_mapping = array(
-            'guest_name' => array('guest_name', 'name', 'full_name', 'fullname'),
-            'email' => array('email', 'email_address'),
-            'phone' => array('phone', 'phone_number', 'telephone'),
-            'checkin_date' => array('checkin_date', 'checkin', 'check_in_date', 'start_date'),
-            'checkout_date' => array('checkout_date', 'checkout', 'check_out_date', 'end_date')
-        );
-        
-        // Special handling for first/last name combination
-        if (!empty($_POST['first_name']) && !empty($_POST['last_name'])) {
-            $_POST['guest_name'] = trim($_POST['first_name'] . ' ' . $_POST['last_name']);
-            error_log('BR Form Handler - Combined name: ' . $_POST['guest_name']);
-        } elseif (!empty($_POST['firstname']) && !empty($_POST['lastname'])) {
-            $_POST['guest_name'] = trim($_POST['firstname'] . ' ' . $_POST['lastname']);
-            error_log('BR Form Handler - Combined name: ' . $_POST['guest_name']);
-        }
-        
-        // Map fields
-        $mapped_data = array();
-        foreach ($field_mapping as $standard_field => $possible_names) {
-            foreach ($possible_names as $possible_name) {
-                if (!empty($_POST[$possible_name])) {
-                    $mapped_data[$standard_field] = $_POST[$possible_name];
-                    break;
-                }
-            }
-        }
-        
-        error_log('BR Form Handler - Mapped data: ' . print_r($mapped_data, true));
-        
         // Validate required fields
         $required_fields = array('guest_name', 'email', 'phone', 'checkin_date', 'checkout_date');
         $missing_fields = array();
         foreach ($required_fields as $field) {
-            if (empty($mapped_data[$field])) {
+            if (empty($_POST[$field])) {
                 $missing_fields[] = $field;
             }
         }
@@ -174,9 +54,6 @@ class BR_Form_Handler {
             error_log('BR Form Handler - Missing fields: ' . implode(', ', $missing_fields));
             wp_send_json_error('Please fill in all required fields. Missing: ' . implode(', ', $missing_fields));
         }
-        
-        // Use mapped data for the rest of the processing
-        $_POST = array_merge($_POST, $mapped_data);
         
         // Validate email
         if (!is_email($_POST['email'])) {
@@ -192,40 +69,31 @@ class BR_Form_Handler {
             wp_send_json_error('Invalid date format');
         }
         
-        // Validate it's exactly 6 nights (Sunday to Saturday)
+        // Validate minimum nights (3 nights minimum)
         $nights = $checkin->diff($checkout)->days;
-        if ($nights !== 6) {
-            error_log('BR Form Handler - Invalid number of nights: ' . $nights);
-            wp_send_json_error('Bookings must be for exactly 6 nights (Sunday to Saturday). You selected ' . $nights . ' nights.');
+        $min_nights = get_option('br_min_nights', 3);
+        
+        if ($nights < $min_nights) {
+            error_log('BR Form Handler - Invalid number of nights: ' . $nights . ' (minimum: ' . $min_nights . ')');
+            wp_send_json_error('Minimum stay is ' . $min_nights . ' nights. You selected ' . $nights . ' nights.');
         }
         
-        // Validate checkin is Sunday
-        if ($checkin->format('w') != 0) {
-            error_log('BR Form Handler - Check-in not on Sunday. Day: ' . $checkin->format('l'));
-            wp_send_json_error('Check-in must be on Sunday. You selected ' . $checkin->format('l'));
+        // Check availability
+        if (!BR_Database::check_availability($_POST['checkin_date'], $_POST['checkout_date'])) {
+            wp_send_json_error('These dates are not available. Please select different dates.');
         }
         
-        // Parse weeks data
-        $weeks_data = array();
-        if (!empty($_POST['weeks_data'])) {
-            $weeks_data = json_decode(stripslashes($_POST['weeks_data']), true);
-            if (!is_array($weeks_data)) {
-                $weeks_data = array();
-            }
-        }
+        // Calculate total price
+        $pricing_engine = new BR_Pricing_Engine();
+        $total_price = $pricing_engine->calculate_total_price(
+            $_POST['checkin_date'],
+            $_POST['checkout_date']
+        );
         
-        // Calculate total price from weeks data
-        $total_price = 0;
-        foreach ($weeks_data as $week) {
-            if (isset($week['rate'])) {
-                $total_price += floatval($week['rate']);
-            }
-        }
-        
-        // If no weeks data, use the submitted total price
-        if (empty($weeks_data) && !empty($_POST['total_price'])) {
-            $total_price = floatval($_POST['total_price']);
-        }
+        // Get additional services
+        $additional_services = isset($_POST['additional_services']) && is_array($_POST['additional_services']) 
+            ? $_POST['additional_services'] 
+            : array();
         
         // Prepare booking data
         $booking_data = array(
@@ -238,11 +106,14 @@ class BR_Form_Handler {
             'message' => sanitize_textarea_field($_POST['message'] ?? ''),
             'status' => 'pending',
             'created_at' => current_time('mysql'),
+            'additional_services' => maybe_serialize($additional_services),
             'booking_data' => maybe_serialize(array(
-                'weeks' => $weeks_data,
                 'form_source' => 'calendar_widget',
                 'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? '',
-                'ip_address' => $_SERVER['REMOTE_ADDR'] ?? ''
+                'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '',
+                'selected_services' => $additional_services,
+                'submission_time' => current_time('mysql'),
+                'timezone' => BR_TIMEZONE
             ))
         );
         
@@ -275,69 +146,101 @@ class BR_Form_Handler {
             'booking_id' => $booking_id,
             'debug' => array(
                 'nights' => $nights,
-                'checkin_day' => $checkin->format('l'),
-                'total_price' => $total_price
+                'total_price' => $total_price,
+                'timezone' => BR_TIMEZONE,
+                'current_time' => current_time('mysql')
             )
         ));
     }
     
     /**
-     * Process Gravity Forms booking data
+     * Handle booking submission from Gravity Forms
      */
-    private function process_gravity_forms_booking($data) {
-        // Implementation depends on your Gravity Forms field mapping
-        // This is a placeholder for the actual implementation
+    public function handle_booking_submission() {
+        // Set timezone to UTC+3
+        date_default_timezone_set(BR_TIMEZONE);
         
-        $booking_data = array(
-            'guest_name' => sanitize_text_field($data['guest_name'] ?? ''),
-            'email' => sanitize_email($data['email'] ?? ''),
-            'phone' => sanitize_text_field($data['phone'] ?? ''),
-            'checkin_date' => sanitize_text_field($data['checkin_date'] ?? ''),
-            'checkout_date' => sanitize_text_field($data['checkout_date'] ?? ''),
-            'total_price' => floatval($data['total_price'] ?? 0),
-            'message' => sanitize_textarea_field($data['message'] ?? ''),
-            'status' => 'pending',
-            'created_at' => current_time('mysql'),
-            'booking_data' => maybe_serialize(array(
-                'form_source' => 'gravity_forms',
-                'form_id' => $data['form_id'] ?? '',
-                'entry_id' => $data['entry_id'] ?? ''
-            ))
-        );
+        // Verify nonce if using custom AJAX
+        if (!wp_verify_nonce($_POST['nonce'], 'br_booking_nonce')) {
+            wp_send_json_error('Invalid nonce');
+        }
         
+        // Process the booking from Gravity Forms data
+        $this->process_gravity_forms_booking($_POST);
+    }
+    
+    /**
+     * Handle Gravity Forms submission
+     */
+    public function handle_gravity_form_submission($entry, $form) {
+        // Set timezone to UTC+3
+        date_default_timezone_set(BR_TIMEZONE);
+        
+        // Check if this is a booking form based on form settings
+        if (!rgar($form, 'br_booking_enabled')) {
+            return;
+        }
+        
+        // Map Gravity Forms fields to booking data
+        $booking_data = $this->map_gravity_forms_data($entry, $form);
+        
+        // Save booking
         $booking_id = $this->save_booking($booking_data);
         
         if ($booking_id) {
             // Send notifications
             do_action('br_send_admin_notification', $booking_id);
             do_action('br_send_guest_confirmation', $booking_id);
+            
+            // Add note to entry
+            GFFormsModel::add_note($entry['id'], 0, 'Booking Request', sprintf(__('Booking request created with ID: %d', 'booking-requests'), $booking_id));
+            
+            // Update entry meta
+            gform_update_meta($entry['id'], 'booking_request_id', $booking_id);
         }
-        
-        return $booking_id;
     }
     
     /**
      * Map Gravity Forms data to booking data
      */
     private function map_gravity_forms_data($entry, $form) {
-        // Get field mappings from settings
-        $field_mappings = get_option('br_gravity_forms_field_mappings', array());
+        // Get field mappings from form settings
+        $first_name = rgar($entry, rgar($form, 'br_field_first_name'));
+        $last_name = rgar($entry, rgar($form, 'br_field_last_name'));
+        $guest_name = trim($first_name . ' ' . $last_name);
         
-        // Default mapping - you'll need to customize this based on your form
+        // Get additional services from checkboxes
+        $additional_services = array();
+        $services_field_id = rgar($form, 'br_field_additional_services');
+        if ($services_field_id) {
+            foreach ($form['fields'] as $field) {
+                if ($field->id == $services_field_id && $field->type == 'checkbox') {
+                    foreach ($field->choices as $index => $choice) {
+                        $input_id = $services_field_id . '.' . ($index + 1);
+                        if (rgar($entry, $input_id)) {
+                            $additional_services[] = sanitize_title($choice['text']);
+                        }
+                    }
+                }
+            }
+        }
+        
         $booking_data = array(
-            'guest_name' => rgar($entry, $field_mappings['guest_name'] ?? '1'),
-            'email' => rgar($entry, $field_mappings['email'] ?? '2'),
-            'phone' => rgar($entry, $field_mappings['phone'] ?? '3'),
-            'checkin_date' => rgar($entry, $field_mappings['checkin_date'] ?? '4'),
-            'checkout_date' => rgar($entry, $field_mappings['checkout_date'] ?? '5'),
-            'message' => rgar($entry, $field_mappings['message'] ?? '6'),
+            'guest_name' => $guest_name,
+            'email' => rgar($entry, rgar($form, 'br_field_email')),
+            'phone' => rgar($entry, rgar($form, 'br_field_phone')),
+            'checkin_date' => rgar($entry, rgar($form, 'br_field_checkin_date')),
+            'checkout_date' => rgar($entry, rgar($form, 'br_field_checkout_date')),
+            'message' => rgar($entry, rgar($form, 'br_field_details')),
             'status' => 'pending',
             'created_at' => current_time('mysql'),
+            'additional_services' => maybe_serialize($additional_services),
             'booking_data' => maybe_serialize(array(
                 'form_source' => 'gravity_forms',
                 'form_id' => $form['id'],
                 'entry_id' => $entry['id'],
-                'form_title' => $form['title']
+                'form_title' => $form['title'],
+                'timezone' => BR_TIMEZONE
             ))
         );
         
@@ -355,116 +258,42 @@ class BR_Form_Handler {
      * Save booking to database
      */
     private function save_booking($booking_data) {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'br_bookings';
-        
-        // Check if table exists first
-        if (!$this->check_database_table()) {
-            error_log('BR Form Handler: Cannot save booking - table does not exist');
-            return false;
-        }
-        
-        $inserted = $wpdb->insert($table_name, $booking_data);
-        
-        if (!$inserted) {
-            error_log('BR Form Handler: Failed to save booking - ' . $wpdb->last_error);
-            return false;
-        }
-        
-        return $wpdb->insert_id;
+        return BR_Database::save_booking($booking_data);
     }
     
     /**
-     * Validate booking dates against pricing periods
+     * Check if database table exists
      */
-    private function validate_booking_dates($checkin_date, $checkout_date) {
-        $pricing_engine = new BR_Pricing_Engine();
-        
-        // Check if dates fall within valid pricing periods
-        $checkin = new DateTime($checkin_date);
-        $checkout = new DateTime($checkout_date);
-        
-        // Get pricing data
-        $pricing_data = $pricing_engine->get_pricing_for_dates($checkin_date, $checkout_date);
-        
-        if (empty($pricing_data)) {
-            return false;
-        }
-        
-        // Additional validation can be added here
-        return true;
+    private function check_database_table() {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'br_bookings';
+        return $wpdb->get_var("SHOW TABLES LIKE '$table_name'") == $table_name;
     }
     
     /**
-     * Check if dates are available
+     * Test form handler for debugging
      */
-    public function check_availability($checkin_date, $checkout_date) {
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'br_bookings';
+    public function test_form_handler() {
+        // Log all received data
+        error_log('BR Form Handler Test - POST data: ' . print_r($_POST, true));
+        error_log('BR Form Handler Test - Nonce: ' . ($_POST['nonce'] ?? 'not set'));
         
-        // Check if table exists
-        if (!$this->check_database_table()) {
-            return true; // If no table, assume available
-        }
+        $response = array(
+            'received_data' => $_POST,
+            'nonce_valid' => wp_verify_nonce($_POST['nonce'] ?? '', 'br_calendar_nonce'),
+            'required_fields' => array(
+                'guest_name' => !empty($_POST['guest_name']),
+                'email' => !empty($_POST['email']),
+                'phone' => !empty($_POST['phone']),
+                'checkin_date' => !empty($_POST['checkin_date']),
+                'checkout_date' => !empty($_POST['checkout_date'])
+            ),
+            'email_valid' => is_email($_POST['email'] ?? ''),
+            'database_table_exists' => $this->check_database_table(),
+            'timezone' => BR_TIMEZONE,
+            'current_time' => current_time('mysql')
+        );
         
-        // Check for overlapping approved bookings
-        $overlap = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $table_name 
-            WHERE status = 'approved' 
-            AND (
-                (checkin_date <= %s AND checkout_date > %s) OR
-                (checkin_date < %s AND checkout_date >= %s) OR
-                (checkin_date >= %s AND checkout_date <= %s)
-            )",
-            $checkin_date, $checkin_date,
-            $checkout_date, $checkout_date,
-            $checkin_date, $checkout_date
-        ));
-        
-        return $overlap == 0;
+        wp_send_json_success($response);
     }
 }
-
-// Add debug test to functions
-add_action('wp_footer', function() {
-    if (is_page() && current_user_can('manage_options')) {
-        ?>
-        <script>
-        jQuery(document).ready(function($) {
-            // Test form handler
-            if (window.location.hash === '#test-form') {
-                console.log('Testing form handler...');
-                
-                $.post(br_calendar.ajax_url, {
-                    action: 'br_test_form_handler',
-                    nonce: br_calendar.nonce,
-                    guest_name: 'Test User',
-                    email: 'test@example.com',
-                    phone: '123-456-7890',
-                    checkin_date: '2025-06-15',
-                    checkout_date: '2025-06-21'
-                }).done(function(response) {
-                    console.log('Form handler test response:', response);
-                }).fail(function(xhr) {
-                    console.log('Form handler test failed:', xhr.responseText);
-                });
-            }
-            
-            // Log form submission
-            $(document).on('submit', '.br-booking-form', function(e) {
-                console.log('=== FORM SUBMISSION DEBUG ===');
-                console.log('Form action:', $(this).attr('action'));
-                console.log('Form method:', $(this).attr('method'));
-                console.log('Form data:', $(this).serialize());
-                
-                // Log each field
-                $(this).find('input, textarea, select').each(function() {
-                    console.log('Field:', $(this).attr('name'), '=', $(this).val());
-                });
-            });
-        });
-        </script>
-        <?php
-    }
-});
-?>
